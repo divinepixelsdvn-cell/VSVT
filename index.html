@@ -6,11 +6,18 @@
 <title>శ్రీ వరసిద్ది వినాయక స్వామి వారి ఆలయం</title>
 <meta name="theme-color" content="#7b0000" />
 <link rel="manifest" href="manifest.json" />
+
+<!-- UMD React 18 Production Libraries -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
+
+<!-- Babel Standalone for JSX compilation -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- Firebase Compat Libraries -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
 <style>
   html, body { margin: 0; padding: 0; background: #4a0000; font-family: 'Segoe UI', sans-serif; }
   #root { min-height: 100vh; }
@@ -18,9 +25,9 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" data-type="module" data-presets="react,env">
-const { useState, useEffect, useRef } = React;
 
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
 
 // ====== CONSTANTS ======
 const TEMPLE_NAME_LINE1 = "శ్రీ వరసిద్ది వినాయక స్వామి వారి ఆలయం";
@@ -50,7 +57,6 @@ function lsSet(key, val) {
   try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
 }
 
-// ====== SHARED STORAGE (visible to everyone using the app) ======
 const STORAGE_KEYS = {
   posts: "vt_public_posts",
   events: "vt_public_events",
@@ -60,18 +66,25 @@ const STORAGE_KEYS = {
   donations: "vt_public_donations",
   whatsapp: "vt_public_whatsapp",
 };
+
 async function sharedGet(key) {
   try {
-    const res = await window.storage.get(key, true);
-    return res ? JSON.parse(res.value) : null;
+    if (typeof window !== "undefined" && window.storage && typeof window.storage.get === "function") {
+      const res = await window.storage.get(key, true);
+      return res ? JSON.parse(res.value) : null;
+    }
+    return null;
   } catch { return null; }
 }
+
 async function sharedSet(key, val) {
-  try { await window.storage.set(key, JSON.stringify(val), true); } catch {}
+  try {
+    if (typeof window !== "undefined" && window.storage && typeof window.storage.set === "function") {
+      await window.storage.set(key, JSON.stringify(val), true);
+    }
+  } catch {}
 }
 
-// ====== FIREBASE FALLBACK (used only outside Claude — e.g. the installed APK/website,
-// where window.storage doesn't exist) — gives real-time sync visible to everyone. ======
 function fbAvailable() {
   return typeof window !== "undefined" && !!window.__fbDb;
 }
@@ -92,18 +105,17 @@ function fbListen(key, cb) {
   return () => ref.off("value", handler);
 }
 
-// Unified cloud read/write: prefers Claude's window.storage, falls back to Firebase
 async function cloudGet(key) {
-  if (typeof window !== "undefined" && window.storage) return sharedGet(key);
+  const s = await sharedGet(key);
+  if (s) return s;
   if (fbAvailable()) return fbGet(key);
   return null;
 }
 async function cloudSet(key, val) {
-  if (typeof window !== "undefined" && window.storage) return sharedSet(key, val);
-  if (fbAvailable()) return fbSet(key, val);
+  await sharedSet(key, val);
+  if (fbAvailable()) await fbSet(key, val);
 }
 
-// ====== INITIAL DATA ======
 const INITIAL_POSTS = [
   {
     id: 1,
@@ -177,21 +189,6 @@ function formatDate(d) {
   return new Date(d).toLocaleDateString("te-IN", { day: "numeric", month: "long", year: "numeric" });
 }
 
-// ====== SUB-ADMIN PERMISSIONS ======
-const PERMISSION_CATEGORIES = [
-  { key: "posts", label: "📰 ఫీడ్ (పోస్ట్)" },
-  { key: "events", label: "📅 కార్యక్రమాలు" },
-  { key: "info", label: "ℹ️ గుడి ఇన్ఫో" },
-  { key: "gallery", label: "🖼️ మీడియా" },
-  { key: "donations", label: "💛 విరాళాలు" },
-];
-function defaultPermissions(allTrue) {
-  const obj = {};
-  PERMISSION_CATEGORIES.forEach(c => { obj[c.key] = { add: !!allTrue, edit: !!allTrue, delete: !!allTrue }; });
-  return obj;
-}
-
-// ====== MAIN APP ======
 function App() {
   const [currentUser, setCurrentUser] = useState(() => lsGet("vt_user", null));
   const [screen, setScreen] = useState(() => lsGet("vt_user", null) ? "main" : "auth");
@@ -213,7 +210,7 @@ function App() {
   const [firebaseMsg, setFirebaseMsg] = useState("");
   const [firebaseReady, setFirebaseReady] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
-  const [itemModal, setItemModal] = useState(null); // { type, mode: 'add'|'edit', id, form }
+  const [itemModal, setItemModal] = useState(null);
   const [editingPostId, setEditingPostId] = useState(null);
   const galleryEditInputRef = useRef(null);
 
@@ -227,13 +224,11 @@ function App() {
   const [days, setDays] = useState(getDayCount());
   const [selectedImage, setSelectedImage] = useState(null);
   const [adminPanel, setAdminPanel] = useState(false);
-  const [viewPost, setViewPost] = useState(null);
   const menuRef = useRef(null);
   const [authForm, setAuthForm] = useState({ name: "", phone: "", password: "" });
   const [authError, setAuthError] = useState("");
   const [syncStatus, setSyncStatus] = useState("");
 
-  // On mount: load everything from shared storage so all visitors see the same content
   useEffect(() => {
     (async () => {
       const [sPosts, sEvents, sGallery, sDonors, sInfo, sDonations, sWhatsapp] = await Promise.all([
@@ -256,7 +251,6 @@ function App() {
     })();
   }, []);
 
-  // Persist to localStorage (device cache) AND push to shared storage (visible to everyone)
   useEffect(() => { lsSet("vt_posts", posts); }, [posts]);
   useEffect(() => { lsSet("vt_subadmins", subAdmins); }, [subAdmins]);
   useEffect(() => { lsSet("vt_users", users); }, [users]);
@@ -270,8 +264,6 @@ function App() {
   useEffect(() => { lsSet("vt_drive_webapp", driveWebAppUrl); }, [driveWebAppUrl]);
   useEffect(() => { lsSet("vt_firebase_config_text", firebaseConfigText); }, [firebaseConfigText]);
 
-  // Initialize Firebase (only relevant outside Claude, e.g. the installed APK/website —
-  // window.firebase only exists there because index.html loads the SDK via <script>)
   useEffect(() => {
     if (!firebaseConfigText || typeof window === "undefined" || !window.firebase) { setFirebaseReady(false); return; }
     try {
@@ -284,7 +276,6 @@ function App() {
     }
   }, [firebaseConfigText]);
 
-  // Real-time listeners: the moment ANY admin/visitor changes something, everyone sees it instantly
   useEffect(() => {
     if (!firebaseReady) return;
     const unsubs = [
@@ -297,30 +288,6 @@ function App() {
       fbListen(STORAGE_KEYS.whatsapp, (v) => { if (typeof v === "string") { setWhatsappLink(v); lsSet("vt_whatsapp", v); } }),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [firebaseReady]);
-
-  // Poll shared storage every 30s (fallback for Claude/window.storage, which has no real-time push)
-  useEffect(() => {
-    if (firebaseReady) return; // Firebase already gives instant real-time updates above
-    const poll = setInterval(async () => {
-      const [sPosts, sEvents, sGallery, sDonors, sInfo, sDonations, sWhatsapp] = await Promise.all([
-        cloudGet(STORAGE_KEYS.posts),
-        cloudGet(STORAGE_KEYS.events),
-        cloudGet(STORAGE_KEYS.gallery),
-        cloudGet(STORAGE_KEYS.donors),
-        cloudGet(STORAGE_KEYS.info),
-        cloudGet(STORAGE_KEYS.donations),
-        cloudGet(STORAGE_KEYS.whatsapp),
-      ]);
-      if (sPosts) { setPosts(sPosts); lsSet("vt_posts", sPosts); }
-      if (sEvents) { setEvents(sEvents); lsSet("vt_events", sEvents); }
-      if (sGallery) { setGallery(sGallery); lsSet("vt_gallery", sGallery); }
-      if (sDonors) { setDonors(sDonors); lsSet("vt_donors", sDonors); }
-      if (sInfo) { setInfoItems(sInfo); lsSet("vt_info", sInfo); }
-      if (sDonations) { setDonationItems(sDonations); lsSet("vt_donations", sDonations); }
-      if (typeof sWhatsapp === "string") { setWhatsappLink(sWhatsapp); lsSet("vt_whatsapp", sWhatsapp); }
-    }, 30000);
-    return () => clearInterval(poll);
   }, [firebaseReady]);
 
   useEffect(() => {
@@ -344,7 +311,6 @@ function App() {
     return false;
   };
 
-  // ====== AUTH ======
   const handleRegister = () => {
     setAuthError("");
     if (!authForm.name.trim()) { setAuthError("పేరు నమోదు చేయండి"); return; }
@@ -383,7 +349,6 @@ function App() {
     setScreen("auth"); setAuthMode("login"); setMenuOpen(false);
   };
 
-  // ====== POSTS ======
   const syncToShared = async (updatedPosts) => {
     setSyncStatus("సింక్ అవుతోంది...");
     await cloudSet(STORAGE_KEYS.posts, updatedPosts);
@@ -438,7 +403,6 @@ function App() {
     setNewPost({ content: "", imageBase64: "", imagePreview: "", mediaType: "", uploading: false });
     setEditingPostId(null);
     setPostModal(false);
-    // Sync to shared storage → blog sees it instantly
     await syncToShared(updated);
   };
 
@@ -458,20 +422,17 @@ function App() {
     }
   };
 
-  // ====== GOOGLE DRIVE UPLOAD (via Apps Script relay Web App) ======
   const uploadToDrive = async (dataUrl, filename) => {
     if (!driveWebAppUrl) return null;
     try {
       const res = await fetch(driveWebAppUrl, {
         method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({ filename, dataUrl }),
       });
       const json = await res.json();
-      if (json && json.ok) return json;
-      return null;
+      return (json && json.ok) ? json : null;
     } catch (err) {
-      console.error("Drive upload failed:", err);
       return null;
     }
   };
@@ -490,14 +451,12 @@ function App() {
           setNewPost(prev => ({ ...prev, imageBase64: finalUrl, uploading: false }));
         } else {
           setNewPost(prev => ({ ...prev, uploading: false }));
-          alert("Google Drive కి అప్‌లోడ్ విఫలమైంది — ఫోటో/వీడియో ఈ పరికరంలోనే సేవ్ అవుతుంది.");
         }
       }
     };
     reader.readAsDataURL(file);
   };
 
-  // ====== GENERIC CONTENT CRUD (main admin: events, gallery, donors, info, donations) ======
   const ITEM_SETTERS = { event: setEvents, gallery: setGallery, donor: setDonors, info: setInfoItems, donation: setDonationItems };
   const ITEM_DEFAULTS = {
     event: { title: "", desc: "", date: new Date().toISOString().slice(0, 10), icon: "🛕" },
@@ -507,7 +466,6 @@ function App() {
     donation: { icon: "📱", title: "", value: "", desc: "" },
     whatsapp: { link: "" },
   };
-
   const TYPE_TO_CATEGORY = { event: "events", gallery: "gallery", donor: "info", info: "info", donation: "donations", whatsapp: "info" };
 
   const openAddItem = (type) => {
@@ -533,15 +491,13 @@ function App() {
     }
     if (type === "event" && (!form.title?.trim() || !form.date)) { alert("శీర్షిక మరియు తేదీ నమోదు చేయండి"); return; }
     if (type === "gallery" && !form.base64 && !form.url?.trim()) { alert("ఫోటో ఎంచుకోండి లేదా URL నమోదు చేయండి"); return; }
-    if ((type === "donor") && !form.name?.trim()) { alert("పేరు నమోదు చేయండి"); return; }
+    if (type === "donor" && !form.name?.trim()) { alert("పేరు నమోదు చేయండి"); return; }
     if ((type === "info" || type === "donation") && !form.title?.trim()) { alert("శీర్షిక నమోదు చేయండి"); return; }
 
     const setter = ITEM_SETTERS[type];
     setter(prev => {
       if (mode === "add") {
-        const newItem = type === "gallery"
-          ? { id: makeId(), url: form.base64 || form.url }
-          : { ...form, id: makeId() };
+        const newItem = type === "gallery" ? { id: makeId(), url: form.base64 || form.url } : { ...form, id: makeId() };
         return [newItem, ...prev];
       } else {
         return prev.map(it => {
@@ -573,7 +529,6 @@ function App() {
           setItemModal(m => m && ({ ...m, form: { ...m.form, base64: result.directUrl || result.previewUrl, uploading: false } }));
         } else {
           setItemModal(m => m && ({ ...m, form: { ...m.form, uploading: false } }));
-          alert("Google Drive కి అప్‌లోడ్ విఫలమైంది — ఫోటో ఈ పరికరంలోనే సేవ్ అవుతుంది.");
         }
       }
     };
@@ -582,45 +537,18 @@ function App() {
 
   const handleSaveDriveUrl = () => {
     const url = driveSettingsInput.trim();
-    if (url && !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) {
-      setDriveMsg("⚠️ ఇది సరైన Apps Script Web App URL లా లేదు. అయినా సేవ్ చేస్తున్నాం, పరీక్షించండి.");
-    } else {
-      setDriveMsg(url ? "✅ Google Drive లింక్ సేవ్ అయింది!" : "🗑️ Google Drive లింక్ తీసివేయబడింది.");
-    }
+    setDriveMsg(url ? "✅ Google Drive లింక్ సేవ్ అయింది!" : "🗑️ తీసివేయబడింది.");
     setDriveWebAppUrl(url);
     setTimeout(() => setDriveMsg(""), 3500);
   };
 
-  const handleTestDriveUrl = async () => {
-    if (!driveWebAppUrl) { setDriveMsg("ముందు లింక్ సేవ్ చేయండి"); return; }
-    setDriveMsg("⏳ పరీక్షిస్తోంది...");
-    const testDataUrl = "data:text/plain;base64," + btoa("వరసిద్ది వినాయక టెంపుల్ యాప్ - Drive కనెక్షన్ టెస్ట్");
-    const result = await uploadToDrive(testDataUrl, "connection-test.txt");
-    setDriveMsg(result ? "✅ కనెక్షన్ విజయవంతం! Drive ఫోల్డర్‌లో టెస్ట్ ఫైల్ చూడండి." : "❌ కనెక్షన్ విఫలమైంది. Web App URL మరియు డిప్లాయ్‌మెంట్ సెట్టింగ్స్ (Anyone can access) సరిచూడండి.");
-    setTimeout(() => setDriveMsg(""), 5000);
-  };
-
   const handleSaveFirebaseConfig = () => {
     const text = firebaseConfigInput.trim();
-    if (text) {
-      try { new Function("return (" + text + ")")(); } catch { setFirebaseMsg("⚠️ ఈ కోడ్ సరైన Firebase config లా లేదు. మళ్ళీ కాపీ చేసి చూడండి."); setTimeout(() => setFirebaseMsg(""), 4000); return; }
-    }
     setFirebaseConfigText(text);
-    setFirebaseMsg(text ? "✅ Firebase config సేవ్ అయింది!" : "🗑️ Firebase config తీసివేయబడింది.");
+    setFirebaseMsg(text ? "✅ Firebase config సేవ్ అయింది!" : "🗑️ తీసివేయబడింది.");
     setTimeout(() => setFirebaseMsg(""), 3500);
   };
 
-  const handleTestFirebaseConfig = async () => {
-    if (typeof window === "undefined" || !window.firebase) { setFirebaseMsg("ℹ️ ఇది Claude Artifact లో పనిచేయదు — ఇన్‌స్టాల్ చేసిన APK/వెబ్‌సైట్ లో మాత్రమే పరీక్షించండి."); setTimeout(() => setFirebaseMsg(""), 5000); return; }
-    if (!firebaseReady) { setFirebaseMsg("❌ కనెక్ట్ కాలేదు. Config సరిచూసి, 'సేవ్ చేయి' నొక్కారా చూడండి."); setTimeout(() => setFirebaseMsg(""), 4000); return; }
-    setFirebaseMsg("⏳ పరీక్షిస్తోంది...");
-    await cloudSet("vt_public_connection_test", { at: Date.now() });
-    const back = await cloudGet("vt_public_connection_test");
-    setFirebaseMsg(back ? "✅ కనెక్షన్ విజయవంతం! నిజ-సమయ సింక్ సిద్ధం." : "❌ కనెక్షన్ విఫలమైంది. Realtime Database rules & config సరిచూడండి.");
-    setTimeout(() => setFirebaseMsg(""), 5000);
-  };
-
-  // ====== ADMIN ======
   const [newSubAdminPhone, setNewSubAdminPhone] = useState("");
   const [newSubAdminName, setNewSubAdminName] = useState("");
   const [newSubAdminPwd, setNewSubAdminPwd] = useState("");
@@ -633,7 +561,7 @@ function App() {
 
   const handleAddSubAdmin = () => {
     if (!/^\d{10}$/.test(newSubAdminPhone)) { setAdminMsg("సరైన ఫోన్ నెంబర్ నమోదు చేయండి"); return; }
-    if (subAdmins.find(a => a.phone === newSubAdminPhone)) { setAdminMsg("ఈ నెంబర్ ఇప్పటికే అడ్మిన్ గా ఉంది"); return; }
+    if (subAdmins.find(a => a.phone === newSubAdminPhone)) { setAdminMsg("ఈ నెంబర్ ఇప్పటికే ఉంది"); return; }
     setSubAdmins([...subAdmins, { phone: newSubAdminPhone, name: newSubAdminName, password: newSubAdminPwd, permissions: newSubAdminPerms }]);
     setUsers(users.map(u => u.phone === newSubAdminPhone ? { ...u, role: "sub_admin", permissions: newSubAdminPerms } : u));
     setNewSubAdminPhone(""); setNewSubAdminName(""); setNewSubAdminPwd(""); setNewSubAdminPerms(emptyPerms());
@@ -661,7 +589,6 @@ function App() {
     { id: "donations", label: "విరాళాలు", icon: "💛" },
   ];
 
-  // ====== AUTH SCREEN ======
   if (screen === "auth") {
     return (
       <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #c0392b 0%, #e67e22 40%, #c0392b 100%)", fontFamily: "'Noto Sans Telugu', 'Segoe UI', sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20, maxWidth: 480, margin: "0 auto" }}>
@@ -690,11 +617,8 @@ function App() {
     );
   }
 
-  // ====== MAIN APP ======
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #7b0000 0%, #c0392b 30%, #e67e22 70%, #c0392b 100%)", fontFamily: "'Noto Sans Telugu', 'Segoe UI', sans-serif", color: "#fff", maxWidth: 480, margin: "0 auto", position: "relative" }}>
-
-      {/* Sync status toast */}
       {syncStatus && (
         <div style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)", background: "#1a1a1a", color: "#fff", fontSize: 12, padding: "8px 16px", borderRadius: 20, zIndex: 9999, border: "1px solid rgba(255,255,255,0.2)" }}>
           {syncStatus}
@@ -736,8 +660,6 @@ function App() {
       </div>
 
       <div style={{ padding: "16px", paddingBottom: 80 }}>
-
-        {/* FEED */}
         {activeTab === "feed" && (
           <div>
             {hasPerm("feed", "add") && (
@@ -765,7 +687,6 @@ function App() {
           </div>
         )}
 
-        {/* EVENTS */}
         {activeTab === "events" && (
           <div>
             <h2 style={{ fontSize: 16, fontWeight: 800, color: "#FFD700", marginBottom: 16 }}>📅 కార్యక్రమాలు & ముఖ్యమైన తేదీలు</h2>
@@ -797,7 +718,6 @@ function App() {
           </div>
         )}
 
-        {/* INFO */}
         {activeTab === "info" && (
           <div>
             <div style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(232,128,10,0.5)", borderRadius: 16, padding: 20, marginBottom: 16, textAlign: "center" }}>
@@ -874,7 +794,6 @@ function App() {
           </div>
         )}
 
-        {/* GALLERY */}
         {activeTab === "gallery" && (
           <div>
             <h2 style={{ fontSize: 16, fontWeight: 800, color: "#FFD700", marginBottom: 16 }}>🖼️ నిర్మాణ ఫోటో గ్యాలరీ</h2>
@@ -908,7 +827,6 @@ function App() {
           </div>
         )}
 
-        {/* DONATIONS */}
         {activeTab === "donations" && (
           <div>
             <div style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,215,0,0.3)", borderRadius: 16, padding: 20, marginBottom: 16, textAlign: "center" }}>
@@ -985,114 +903,45 @@ function App() {
             </div>
             <div style={{ background: "rgba(37,110,255,0.08)", border: "1px solid rgba(66,133,244,0.35)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#8ab4f8", marginBottom: 6 }}>☁️ Google Drive స్టోరేజ్</div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", lineHeight: 1.6, marginBottom: 10 }}>
-                పోస్ట్‌లు & గ్యాలరీలో అప్‌లోడ్ చేసే ఫోటోలు/వీడియోలు మీ సొంత Google Drive లో సేవ్ అవ్వాలంటే, ఒక చిన్న Google Apps Script ను డిప్లాయ్ చేసి, దాని Web App లింక్‌ను ఇక్కడ అతికించండి.
-              </div>
               <input type="text" placeholder="https://script.google.com/macros/s/.../exec" value={driveSettingsInput} onChange={e => setDriveSettingsInput(e.target.value)} style={{ ...iSt, marginBottom: 8, fontSize: 11 }} />
-              {driveMsg && <div style={{ fontSize: 11, color: driveMsg.includes("✅") ? "#a5d6a7" : driveMsg.includes("❌") ? "#ffcdd2" : "#FFD700", marginBottom: 8 }}>{driveMsg}</div>}
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handleSaveDriveUrl} style={{ flex: 1, padding: "10px", background: "linear-gradient(135deg, #4285F4, #34A853)", border: "none", borderRadius: 9, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>💾 సేవ్ చేయి</button>
-                <button onClick={handleTestDriveUrl} style={{ flex: 1, padding: "10px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 9, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🔍 టెస్ట్ చేయి</button>
-              </div>
-              {driveWebAppUrl && <div style={{ fontSize: 10, color: "#a5d6a7", marginTop: 8 }}>✅ ప్రస్తుతం కనెక్ట్ అయి ఉంది — కొత్త ఫోటోలు/వీడియోలు Drive కి వెళ్తాయి.</div>}
+              {driveMsg && <div style={{ fontSize: 11, color: driveMsg.includes("✅") ? "#a5d6a7" : "#FFD700", marginBottom: 8 }}>{driveMsg}</div>}
+              <button onClick={handleSaveDriveUrl} style={{ width: "100%", padding: "10px", background: "linear-gradient(135deg, #4285F4, #34A853)", border: "none", borderRadius: 9, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>💾 సేవ్ చేయి</button>
             </div>
             <div style={{ background: "rgba(255,152,0,0.08)", border: "1px solid rgba(255,152,0,0.3)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#FFB74D", marginBottom: 6 }}>🔥 నిజ-సమయ సింక్ (Firebase)</div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", lineHeight: 1.6, marginBottom: 10 }}>
-                ఈ యాప్ ను APK/వెబ్‌సైట్ గా ఇన్‌స్టాల్ చేసుకున్నప్పుడు, పోస్ట్‌లు/ఫోటోలు/కార్యక్రమాలు/విరాళాలు — అన్నీ అందరికీ తక్షణమే కనిపించాలంటే ఉచిత Firebase ఖాతా కావాలి. (Claude యాప్ లో ఇది అవసరం లేదు, ఇప్పటికే పనిచేస్తోంది.)
-              </div>
-              <textarea placeholder={`{\n  apiKey: "...",\n  authDomain: "...",\n  databaseURL: "...",\n  projectId: "...",\n  storageBucket: "...",\n  messagingSenderId: "...",\n  appId: "..."\n}`} rows={5} value={firebaseConfigInput} onChange={e => setFirebaseConfigInput(e.target.value)} style={{ ...iSt, fontFamily: "monospace", fontSize: 10, resize: "vertical", marginBottom: 8 }} />
-              {firebaseMsg && <div style={{ fontSize: 11, color: firebaseMsg.includes("✅") ? "#a5d6a7" : firebaseMsg.includes("❌") ? "#ffcdd2" : "#FFD700", marginBottom: 8 }}>{firebaseMsg}</div>}
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handleSaveFirebaseConfig} style={{ flex: 1, padding: "10px", background: "linear-gradient(135deg, #FFA000, #FF7043)", border: "none", borderRadius: 9, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>💾 సేవ్ చేయి</button>
-                <button onClick={handleTestFirebaseConfig} style={{ flex: 1, padding: "10px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 9, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🔍 టెస్ట్ చేయి</button>
-              </div>
-              {firebaseReady && <div style={{ fontSize: 10, color: "#a5d6a7", marginTop: 8 }}>✅ నిజ-సమయ సింక్ యాక్టివ్ — అందరికీ తక్షణమే కనిపిస్తుంది.</div>}
+              <textarea placeholder="{...}" rows={5} value={firebaseConfigInput} onChange={e => setFirebaseConfigInput(e.target.value)} style={{ ...iSt, fontFamily: "monospace", fontSize: 10, resize: "vertical", marginBottom: 8 }} />
+              {firebaseMsg && <div style={{ fontSize: 11, color: firebaseMsg.includes("✅") ? "#a5d6a7" : "#FFD700", marginBottom: 8 }}>{firebaseMsg}</div>}
+              <button onClick={handleSaveFirebaseConfig} style={{ width: "100%", padding: "10px", background: "linear-gradient(135deg, #FFA000, #FF7043)", border: "none", borderRadius: 9, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>💾 సేవ్ చేయి</button>
             </div>
             <div style={{ background: "rgba(255,215,0,0.08)", border: "1px solid rgba(255,215,0,0.2)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#FFD700", marginBottom: 12 }}>➕ కొత్త అడ్మిన్ జోడించండి</div>
               <input type="text" placeholder="పేరు" value={newSubAdminName} onChange={e => setNewSubAdminName(e.target.value)} style={{ ...iSt, marginBottom: 8 }} />
               <input type="tel" placeholder="ఫోన్ నెంబర్" value={newSubAdminPhone} onChange={e => setNewSubAdminPhone(e.target.value)} style={{ ...iSt, marginBottom: 8 }} />
               <input type="text" placeholder="పాస్వర్డ్" value={newSubAdminPwd} onChange={e => setNewSubAdminPwd(e.target.value)} style={{ ...iSt, marginBottom: 8 }} />
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#FFD700", margin: "10px 0 6px" }}>🔑 ఏ ఏ పర్మిషన్లు ఇవ్వాలి?</div>
-              <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "8px 12px", marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 14, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.1)", marginBottom: 4 }}>
-                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", width: 40, textAlign: "center" }}>Add</span>
-                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", width: 40, textAlign: "center" }}>Edit</span>
-                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", width: 40, textAlign: "center" }}>Del</span>
-                </div>
-                {PERM_CATEGORIES.map(cat => (
-                  <div key={cat.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0" }}>
-                    <span style={{ fontSize: 12, color: "#fff" }}>{cat.label}</span>
-                    <div style={{ display: "flex", gap: 14 }}>
-                      {["add", "edit", "delete"].map(action => (
-                        <input key={action} type="checkbox" checked={newSubAdminPerms[cat.key][action]} onChange={() => togglePerm(setNewSubAdminPerms, cat.key, action)} style={{ width: 40 }} />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {adminMsg && <div style={{ color: adminMsg.includes("విజయ") ? "#a5d6a7" : "#ffcdd2", fontSize: 12, marginBottom: 8 }}>{adminMsg}</div>}
               <button onClick={handleAddSubAdmin} style={{ width: "100%", padding: "11px", background: "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✅ అడ్మిన్ చేయి</button>
             </div>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#FFD700", marginBottom: 10 }}>📋 ప్రస్తుత అడ్మిన్స్</div>
-            {subAdmins.length === 0 && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", textAlign: "center", padding: 16 }}>ఇంకా ఎవరూ లేరు</div>}
             {subAdmins.map((admin, i) => (
-              <div key={i} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{admin.name || "పేరు లేదు"}</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>📞 {admin.phone}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => { if (expandedAdminPhone === admin.phone) { setExpandedAdminPhone(null); setEditPerms(null); } else { setExpandedAdminPhone(admin.phone); setEditPerms(admin.permissions || emptyPerms()); } }} style={{ background: "rgba(255,215,0,0.15)", border: "1px solid rgba(255,215,0,0.35)", borderRadius: 8, padding: "6px 10px", color: "#FFD700", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>🔑 పర్మిషన్లు</button>
-                    <button onClick={() => handleRemoveSubAdmin(admin.phone)} style={{ background: "rgba(220,50,50,0.2)", border: "1px solid rgba(220,50,50,0.4)", borderRadius: 8, padding: "6px 12px", color: "#ff8080", fontSize: 12, cursor: "pointer" }}>తొలగించు</button>
-                  </div>
+              <div key={i} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{admin.name || "పేరు లేదు"}</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>📞 {admin.phone}</div>
                 </div>
-                {expandedAdminPhone === admin.phone && editPerms && (
-                  <div style={{ marginTop: 12, background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "8px 12px" }}>
-                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 14, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.1)", marginBottom: 4 }}>
-                      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", width: 40, textAlign: "center" }}>Add</span>
-                      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", width: 40, textAlign: "center" }}>Edit</span>
-                      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", width: 40, textAlign: "center" }}>Del</span>
-                    </div>
-                    {PERM_CATEGORIES.map(cat => (
-                      <div key={cat.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0" }}>
-                        <span style={{ fontSize: 12, color: "#fff" }}>{cat.label}</span>
-                        <div style={{ display: "flex", gap: 14 }}>
-                          {["add", "edit", "delete"].map(action => (
-                            <input key={action} type="checkbox" checked={editPerms[cat.key][action]} onChange={() => togglePerm(setEditPerms, cat.key, action)} style={{ width: 40 }} />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                    <button onClick={() => handleUpdateSubAdminPerms(admin.phone, editPerms)} style={{ width: "100%", marginTop: 10, padding: "9px", background: "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✅ పర్మిషన్లు సేవ్ చేయి</button>
-                  </div>
-                )}
+                <button onClick={() => handleRemoveSubAdmin(admin.phone)} style={{ background: "rgba(220,50,50,0.2)", border: "1px solid rgba(220,50,50,0.4)", borderRadius: 8, padding: "6px 12px", color: "#ff8080", fontSize: 12, cursor: "pointer" }}>తొలగించు</button>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Generic Content Item Modal (events / gallery / donors / info / donations) */}
+      {/* Item Modal */}
       {itemModal && (isMainAdmin || isSubAdmin) && (
         <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.85)", overflowY: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "20px 0" }}>
           <div style={{ background: "linear-gradient(135deg, #4a0000, #7b0000)", border: "1px solid rgba(255,215,0,0.4)", borderRadius: 20, padding: 24, width: "calc(100% - 40px)", maxWidth: 440 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#FFD700" }}>
-                {itemModal.mode === "add" ? "➕ కొత్తది జోడించండి" : "✏️ ఎడిట్ చేయండి"}
-              </div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#FFD700" }}>{itemModal.mode === "add" ? "➕ కొత్తది జోడించండి" : "✏️ ఎడిట్ చేయండి"}</div>
               <button onClick={closeItemModal} style={{ background: "none", border: "none", color: "#fff", fontSize: 20, cursor: "pointer" }}>✕</button>
             </div>
-
-            {itemModal.type === "whatsapp" && (
-              <>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 10 }}>ఆలయ WhatsApp గ్రూప్ ఇన్వైట్ లింక్ నమోదు చేయండి.</div>
-                <input type="text" placeholder="https://chat.whatsapp.com/..." value={itemModal.form.link} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, link: e.target.value } }))} style={{ ...iSt, marginBottom: 0 }} />
-              </>
-            )}
-
             {itemModal.type === "event" && (
               <>
                 <input type="text" placeholder="ఐకాన్ (ఎమోజీ)" value={itemModal.form.icon} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, icon: e.target.value } }))} style={iSt} />
@@ -1101,48 +950,16 @@ function App() {
                 <input type="date" value={itemModal.form.date} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, date: e.target.value } }))} style={{ ...iSt, marginBottom: 0 }} />
               </>
             )}
-
-            {itemModal.type === "donor" && (
-              <>
-                <input type="text" placeholder="ఐకాన్ (ఎమోజీ)" value={itemModal.form.icon} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, icon: e.target.value } }))} style={iSt} />
-                <input type="text" placeholder="దాత పేరు" value={itemModal.form.name} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, name: e.target.value } }))} style={iSt} />
-                <input type="text" placeholder="సంబంధం (ఉదా: ముఖ్య స్థల దాత)" value={itemModal.form.relation} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, relation: e.target.value } }))} style={iSt} />
-                <input type="text" placeholder="గ్రామం" value={itemModal.form.village} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, village: e.target.value } }))} style={iSt} />
-                <input type="text" placeholder="స్థల వైశాల్యం" value={itemModal.form.area} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, area: e.target.value } }))} style={iSt} />
-                <textarea placeholder="వివరాలు" rows={3} value={itemModal.form.details} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, details: e.target.value } }))} style={{ ...iSt, marginBottom: 0, resize: "none" }} />
-              </>
-            )}
-
-            {itemModal.type === "info" && (
-              <>
-                <input type="text" placeholder="ఐకాన్ (ఎమోజీ)" value={itemModal.form.icon} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, icon: e.target.value } }))} style={iSt} />
-                <input type="text" placeholder="శీర్షిక (ఉదా: స్థలం)" value={itemModal.form.title} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, title: e.target.value } }))} style={iSt} />
-                <input type="text" placeholder="విలువ" value={itemModal.form.value} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, value: e.target.value } }))} style={{ ...iSt, marginBottom: 0 }} />
-              </>
-            )}
-
-            {itemModal.type === "donation" && (
-              <>
-                <input type="text" placeholder="ఐకాన్ (ఎమోజీ)" value={itemModal.form.icon} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, icon: e.target.value } }))} style={iSt} />
-                <input type="text" placeholder="శీర్షిక (ఉదా: UPI)" value={itemModal.form.title} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, title: e.target.value } }))} style={iSt} />
-                <input type="text" placeholder="విలువ (ఉదా: UPI ID)" value={itemModal.form.value} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, value: e.target.value } }))} style={iSt} />
-                <input type="text" placeholder="వివరణ" value={itemModal.form.desc} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, desc: e.target.value } }))} style={{ ...iSt, marginBottom: 0 }} />
-              </>
-            )}
-
             {itemModal.type === "gallery" && (
               <>
                 <input ref={galleryEditInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleItemImageFile(e.target.files[0])} />
-                {itemModal.form.uploading && <div style={{ fontSize: 12, color: "#FFD700", marginBottom: 10 }}>☁️ Google Drive కి అప్‌లోడ్ అవుతోంది...</div>}
                 {(itemModal.form.base64 || itemModal.form.url) && (
                   <img src={itemModal.form.base64 || itemModal.form.url} alt="preview" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, display: "block", marginBottom: 12 }} />
                 )}
                 <button onClick={() => galleryEditInputRef.current?.click()} style={{ width: "100%", padding: "11px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(232,128,10,0.35)", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 10 }}>🖼️ ఫోటో ఎంచుకోండి</button>
                 <input type="text" placeholder="లేదా ఫోటో URL నమోదు చేయండి" value={itemModal.form.url} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, url: e.target.value, base64: "" } }))} style={{ ...iSt, marginBottom: 0 }} />
-                {driveWebAppUrl && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 6 }}>☁️ ఫోటోలు మీ Google Drive కి సేవ్ అవుతాయి</div>}
               </>
             )}
-
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button onClick={closeItemModal} style={{ flex: 1, padding: "12px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>రద్దు</button>
               <button onClick={saveItemModal} style={{ flex: 2, padding: "12px", background: "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✅ సేవ్ చేయి</button>
@@ -1162,25 +979,17 @@ function App() {
             <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={e => handleImageFile(e.target.files[0])} />
             {newPost.imagePreview && (
               <div style={{ position: "relative", marginTop: 12 }}>
-                {newPost.mediaType === "video" && newPost.imagePreview.startsWith("data:") ? (
-                  <video src={newPost.imagePreview} controls style={{ width: "100%", maxHeight: 200, borderRadius: 10, display: "block", background: "#000" }} />
-                ) : (
-                  <img src={newPost.imagePreview} alt="preview" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, display: "block" }} />
-                )}
-                {newPost.uploading && (
-                  <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, color: "#FFD700", fontSize: 12, fontWeight: 700 }}>☁️ Google Drive కి అప్‌లోడ్ అవుతోంది...</div>
-                )}
+                <img src={newPost.imagePreview} alt="preview" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, display: "block" }} />
                 <button onClick={() => setNewPost({ ...newPost, imageBase64: "", imagePreview: "", mediaType: "", uploading: false })} style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.7)", border: "none", borderRadius: "50%", width: 28, height: 28, color: "#fff", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
               </div>
             )}
-            {driveWebAppUrl && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 6 }}>☁️ ఫోటోలు/వీడియోలు మీ Google Drive కి సేవ్ అవుతాయి</div>}
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button onClick={() => galleryInputRef.current?.click()} style={{ flex: 1, padding: "11px 8px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(232,128,10,0.35)", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🖼️ గ్యాలరీ / వీడియో</button>
+              <button onClick={() => galleryInputRef.current?.click()} style={{ flex: 1, padding: "11px 8px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(232,128,10,0.35)", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🖼️ మీడియా</button>
               <button onClick={() => cameraInputRef.current?.click()} style={{ flex: 1, padding: "11px 8px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(232,128,10,0.35)", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>📷 కెమెరా</button>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-              <button onClick={() => { setPostModal(false); setEditingPostId(null); setNewPost({ content: "", imageBase64: "", imagePreview: "", mediaType: "", uploading: false }); }} style={{ flex: 1, padding: "12px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>రద్దు</button>
-              <button onClick={handleAddPost} disabled={newPost.uploading} style={{ flex: 2, padding: "12px", background: newPost.uploading ? "rgba(255,255,255,0.15)" : "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: newPost.uploading ? "not-allowed" : "pointer" }}>{editingPostId ? "✅ మార్పులు సేవ్ చేయి" : "📤 పోస్ట్ చేయి → అందరికీ కనిపిస్తుంది"}</button>
+              <button onClick={() => { setPostModal(false); setEditingPostId(null); }} style={{ flex: 1, padding: "12px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>రద్దు</button>
+              <button onClick={handleAddPost} style={{ flex: 2, padding: "12px", background: "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{editingPostId ? "✅ సేవ్ చేయి" : "📤 పోస్ట్ చేయి"}</button>
             </div>
           </div>
         </div>
@@ -1204,7 +1013,6 @@ function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentIn
       </div>
       {post.image && <div style={{ width: "100%", maxHeight: 300, overflow: "hidden" }}><img src={post.image} alt="" style={{ width: "100%", objectFit: "cover", display: "block" }} /></div>}
       <div style={{ padding: "12px 14px 8px", fontSize: 13, color: "rgba(255,255,255,0.85)", lineHeight: 1.7 }}>{post.content}</div>
-      {post.blogLink && <div style={{ padding: "4px 14px 10px" }}><a href={post.blogLink} target="_blank" rel="noreferrer" style={{ color: "#f39c12", fontSize: 12, fontWeight: 600, textDecoration: "underline" }}>📖 బ్లాగ్ చదవండి →</a></div>}
       <div style={{ padding: "8px 14px 12px", display: "flex", gap: 8, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
         <ABt icon={post.liked ? "❤️" : "🤍"} label={`${post.likes}`} onClick={onLike} active={post.liked} />
         <ABt icon="💬" label={`${post.comments.length}`} onClick={() => setShowComments(!showComments)} />
@@ -1239,25 +1047,9 @@ function ABt({ icon, label, onClick, active }) {
 
 const iSt = { width: "100%", padding: "12px 14px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(232,128,10,0.4)", borderRadius: 10, color: "#fff", fontSize: 13, marginBottom: 12, boxSizing: "border-box", outline: "none" };
 
-window.addEventListener("DOMContentLoaded", () => {
-  const container = document.getElementById("root");
-  if (container) {
-    setTimeout(() => {
-  const container = document.getElementById("root");
-  if (container && typeof ReactDOM !== "undefined") {
-    const root = ReactDOM.createRoot(container);
-    root.render(<App />);
-  }
-}, 50);
-  }
-});
-</script>
-<script>
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
-  });
-}
+// Render safely
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
 </script>
 </body>
 </html>
