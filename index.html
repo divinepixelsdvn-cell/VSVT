@@ -21,6 +21,7 @@
 <style>
   html, body { margin: 0; padding: 0; background: #4a0000; font-family: 'Segoe UI', sans-serif; }
   #root { min-height: 100vh; }
+  @keyframes vtspin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -221,6 +222,7 @@ function App() {
   const [newPost, setNewPost] = useState({ content: "", imageBase64: "", imagePreview: "", mediaType: "", uploading: false });
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const uploadPromiseRef = useRef(null);
   const [days, setDays] = useState(getDayCount());
   const [selectedImage, setSelectedImage] = useState(null);
   const [adminPanel, setAdminPanel] = useState(false);
@@ -375,27 +377,36 @@ function App() {
 
   const handleAddPost = async () => {
     if (!newPost.content.trim()) return;
-    if (newPost.uploading) { alert("ఫోటో/వీడియో Google Drive కి అప్‌లోడ్ అవుతోంది, కొద్ది క్షణాలు వేచి ఉండండి..."); return; }
     if (editingPostId && !hasPerm("feed", "edit")) return;
     if (!editingPostId && !hasPerm("feed", "add")) return;
+
+    // Drive అప్‌లోడ్ ఇంకా పూర్తి కాకపోయినా పోస్ట్ వెంటనే ఫీడ్‌లో కనిపించేలా —
+    // అప్‌లోడ్ ఇంకా జరుగుతూ ఉంటే దాని Promise ని పట్టుకుని, పూర్తయ్యాక ఆ పోస్టుని అప్డేట్ చేస్తాం.
+    const pendingUpload = newPost.uploading ? uploadPromiseRef.current : null;
+    const localImage = newPost.imageBase64 || null;
+    const localType = newPost.imageBase64 ? (newPost.mediaType || "image") : "text";
+
     let updated;
+    let targetId = editingPostId;
     if (editingPostId) {
       updated = posts.map(p => p.id === editingPostId
-        ? { ...p, content: newPost.content, image: newPost.imageBase64 || p.image, type: newPost.imageBase64 ? (newPost.mediaType || "image") : p.type }
+        ? { ...p, content: newPost.content, image: localImage || p.image, type: localImage ? localType : p.type, uploading: !!pendingUpload }
         : p);
     } else {
+      targetId = Date.now();
       const p = {
-        id: Date.now(),
+        id: targetId,
         author: currentUser?.name || "అతిథి",
         avatar: isMainAdmin ? "👑" : isSubAdmin ? "✍️" : "👤",
         date: new Date().toISOString().slice(0, 10),
-        type: newPost.imageBase64 ? (newPost.mediaType || "image") : "text",
+        type: localType,
         content: newPost.content,
-        image: newPost.imageBase64 || null,
+        image: localImage,
         likes: 0,
         comments: [],
         liked: false,
-        blogLink: null
+        blogLink: null,
+        uploading: !!pendingUpload
       };
       updated = [p, ...posts];
     }
@@ -404,10 +415,22 @@ function App() {
     setEditingPostId(null);
     setPostModal(false);
     await syncToShared(updated);
+
+    if (pendingUpload) {
+      uploadPromiseRef.current = null;
+      pendingUpload.then(finalUrl => {
+        setPosts(prev => {
+          const next = prev.map(pp => pp.id === targetId ? { ...pp, image: finalUrl || pp.image, uploading: false } : pp);
+          syncToShared(next);
+          return next;
+        });
+      });
+    }
   };
 
   const handleEditPost = (post) => {
     setEditingPostId(post.id);
+    uploadPromiseRef.current = null;
     setNewPost({ content: post.content, imageBase64: "", imagePreview: post.image || "", mediaType: post.type === "video" ? "video" : "image", uploading: false });
     setPostModal(true);
   };
@@ -441,17 +464,19 @@ function App() {
     if (!file) return;
     const mediaType = file.type.startsWith("video") ? "video" : "image";
     const reader = new FileReader();
-    reader.onload = async (e) => {
+    reader.onload = (e) => {
       const dataUrl = e.target.result;
       setNewPost(prev => ({ ...prev, imageBase64: dataUrl, imagePreview: dataUrl, mediaType, uploading: !!driveWebAppUrl }));
       if (driveWebAppUrl) {
-        const result = await uploadToDrive(dataUrl, file.name);
-        if (result) {
-          const finalUrl = mediaType === "video" ? result.previewUrl : (result.directUrl || result.previewUrl);
-          setNewPost(prev => ({ ...prev, imageBase64: finalUrl, uploading: false }));
-        } else {
-          setNewPost(prev => ({ ...prev, uploading: false }));
-        }
+        // Drive అప్‌లోడ్ Promise ని ref లో దాచుకుంటున్నాం — పోస్ట్ వెంటనే చేసినా, ఈ Promise పూర్తయ్యాక ఫీడ్‌లోని పోస్ట్ ఆటోమేటిక్‌గా అప్డేట్ అవుతుంది.
+        const uploadPromise = uploadToDrive(dataUrl, file.name).then(result => {
+          const finalUrl = result ? (mediaType === "video" ? result.previewUrl : (result.directUrl || result.previewUrl)) : dataUrl;
+          setNewPost(prev => (prev.imagePreview === dataUrl ? { ...prev, imageBase64: finalUrl, uploading: false } : prev));
+          return finalUrl;
+        });
+        uploadPromiseRef.current = uploadPromise;
+      } else {
+        uploadPromiseRef.current = null;
       }
     };
     reader.readAsDataURL(file);
@@ -663,7 +688,7 @@ function App() {
         {activeTab === "feed" && (
           <div>
             {hasPerm("feed", "add") && (
-              <button onClick={() => { setEditingPostId(null); setNewPost({ content: "", imageBase64: "", imagePreview: "", mediaType: "", uploading: false }); setPostModal(true); }} style={{ width: "100%", background: "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 14, padding: "14px", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 16, boxShadow: "0 4px 15px rgba(0,0,0,0.3)" }}>
+              <button onClick={() => { setEditingPostId(null); uploadPromiseRef.current = null; setNewPost({ content: "", imageBase64: "", imagePreview: "", mediaType: "", uploading: false }); setPostModal(true); }} style={{ width: "100%", background: "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 14, padding: "14px", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 16, boxShadow: "0 4px 15px rgba(0,0,0,0.3)" }}>
                 ➕ కొత్త పోస్ట్ చేయండి
               </button>
             )}
@@ -980,7 +1005,7 @@ function App() {
             {newPost.imagePreview && (
               <div style={{ position: "relative", marginTop: 12 }}>
                 <img src={newPost.imagePreview} alt="preview" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, display: "block" }} />
-                <button onClick={() => setNewPost({ ...newPost, imageBase64: "", imagePreview: "", mediaType: "", uploading: false })} style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.7)", border: "none", borderRadius: "50%", width: 28, height: 28, color: "#fff", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                <button onClick={() => { uploadPromiseRef.current = null; setNewPost({ ...newPost, imageBase64: "", imagePreview: "", mediaType: "", uploading: false }); }} style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.7)", border: "none", borderRadius: "50%", width: 28, height: 28, color: "#fff", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
               </div>
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
@@ -1014,7 +1039,13 @@ function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentIn
         {onDelete && <button onClick={onDelete} style={{ background: "rgba(220,50,50,0.2)", border: "none", borderRadius: 8, padding: "5px 10px", color: "#ff8080", fontSize: 12, cursor: "pointer" }}>🗑️</button>}
       </div>
       {post.image && (
-  <div style={{ width: "100%", maxHeight: 350, overflow: "hidden", borderRadius: 8, marginTop: 8, background: "#000" }}>
+  <div style={{ width: "100%", maxHeight: 350, overflow: "hidden", borderRadius: 8, marginTop: 8, background: "#000", position: "relative" }}>
+    {post.uploading && (
+      <div style={{ position: "absolute", inset: 0, zIndex: 2, background: "rgba(0,0,0,0.45)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        <div style={{ width: 34, height: 34, border: "3px solid rgba(255,255,255,0.25)", borderTopColor: "#f39c12", borderRadius: "50%", animation: "vtspin 0.8s linear infinite" }} />
+        <div style={{ fontSize: 11, color: "#fff", fontWeight: 600 }}>అప్‌లోడ్ అవుతోంది...</div>
+      </div>
+    )}
     {post.type === "video" ? (
       <video src={post.image} controls style={{ width: "100%", display: "block" }} />
     ) : (
