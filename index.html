@@ -460,6 +460,25 @@ function App() {
     }
   };
 
+  // Drive లింక్ నిజంగా బ్రౌజర్‌లో లోడ్ అవుతుందో లేదో సరిచూసే హెల్పర్.
+  // (Drive అప్‌లోడ్ అయిన వెంటనే కొన్నిసార్లు లింక్ కొన్ని క్షణాలు యాక్టివ్ కాదు — దీనివల్ల ఫీడ్‌లో ఫోటో ఖాళీగా కనిపించే సమస్య రాకుండా ఇది ఆపుతుంది.)
+  const preloadImageOnce = (url, timeoutMs) => new Promise(resolve => {
+    let done = false;
+    const finish = (ok) => { if (!done) { done = true; resolve(ok); } };
+    const img = new Image();
+    img.onload = () => finish(true);
+    img.onerror = () => finish(false);
+    img.src = url;
+    setTimeout(() => finish(false), timeoutMs);
+  });
+  const verifyImageUrl = async (url, attempts = 3, delayMs = 1300) => {
+    for (let i = 0; i < attempts; i++) {
+      if (await preloadImageOnce(url, 8000)) return true;
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, delayMs));
+    }
+    return false;
+  };
+
   const handleImageFile = (file) => {
     if (!file) return;
     const mediaType = file.type.startsWith("video") ? "video" : "image";
@@ -469,8 +488,17 @@ function App() {
       setNewPost(prev => ({ ...prev, imageBase64: dataUrl, imagePreview: dataUrl, mediaType, uploading: !!driveWebAppUrl }));
       if (driveWebAppUrl) {
         // Drive అప్‌లోడ్ Promise ని ref లో దాచుకుంటున్నాం — పోస్ట్ వెంటనే చేసినా, ఈ Promise పూర్తయ్యాక ఫీడ్‌లోని పోస్ట్ ఆటోమేటిక్‌గా అప్డేట్ అవుతుంది.
-        const uploadPromise = uploadToDrive(dataUrl, file.name).then(result => {
-          const finalUrl = result ? (mediaType === "video" ? result.previewUrl : (result.directUrl || result.previewUrl)) : dataUrl;
+        const uploadPromise = uploadToDrive(dataUrl, file.name).then(async result => {
+          const candidateUrl = result ? (mediaType === "video" ? result.previewUrl : (result.directUrl || result.previewUrl)) : null;
+          let finalUrl = dataUrl; // డిఫాల్ట్‌గా లోకల్ ఫోటోనే వాడతాం — ఎప్పటికీ ఖాళీగా కనిపించకుండా
+          if (candidateUrl) {
+            if (mediaType === "video") {
+              finalUrl = candidateUrl; // వీడియోలను నేరుగా నమ్ముతాం
+            } else {
+              const ok = await verifyImageUrl(candidateUrl);
+              finalUrl = ok ? candidateUrl : dataUrl;
+            }
+          }
           setNewPost(prev => (prev.imagePreview === dataUrl ? { ...prev, imageBase64: finalUrl, uploading: false } : prev));
           return finalUrl;
         });
@@ -985,6 +1013,34 @@ function App() {
                 <input type="text" placeholder="లేదా ఫోటో URL నమోదు చేయండి" value={itemModal.form.url} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, url: e.target.value, base64: "" } }))} style={{ ...iSt, marginBottom: 0 }} />
               </>
             )}
+            {itemModal.type === "info" && (
+              <>
+                <input type="text" placeholder="ఐకాన్ (ఎమోజీ)" value={itemModal.form.icon || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, icon: e.target.value } }))} style={iSt} />
+                <input type="text" placeholder="శీర్షిక" value={itemModal.form.title || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, title: e.target.value } }))} style={iSt} />
+                <input type="text" placeholder="వివరం (ఉదా: ఉదయం 6 - రాత్రి 8)" value={itemModal.form.value || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, value: e.target.value } }))} style={{ ...iSt, marginBottom: 0 }} />
+              </>
+            )}
+            {itemModal.type === "donor" && (
+              <>
+                <input type="text" placeholder="ఐకాన్ (ఎమోజీ)" value={itemModal.form.icon || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, icon: e.target.value } }))} style={iSt} />
+                <input type="text" placeholder="పేరు" value={itemModal.form.name || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, name: e.target.value } }))} style={iSt} />
+                <input type="text" placeholder="సంబంధం" value={itemModal.form.relation || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, relation: e.target.value } }))} style={iSt} />
+                <input type="text" placeholder="గ్రామం" value={itemModal.form.village || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, village: e.target.value } }))} style={iSt} />
+                <input type="text" placeholder="స్థల వైశాల్యం" value={itemModal.form.area || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, area: e.target.value } }))} style={iSt} />
+                <textarea placeholder="వివరాలు" rows={3} value={itemModal.form.details || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, details: e.target.value } }))} style={{ ...iSt, resize: "none", marginBottom: 0 }} />
+              </>
+            )}
+            {itemModal.type === "donation" && (
+              <>
+                <input type="text" placeholder="ఐకాన్ (ఎమోజీ)" value={itemModal.form.icon || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, icon: e.target.value } }))} style={iSt} />
+                <input type="text" placeholder="శీర్షిక (ఉదా: Google Pay)" value={itemModal.form.title || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, title: e.target.value } }))} style={iSt} />
+                <input type="text" placeholder="నంబర్ / వివరం" value={itemModal.form.value || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, value: e.target.value } }))} style={iSt} />
+                <textarea placeholder="వివరణ" rows={2} value={itemModal.form.desc || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, desc: e.target.value } }))} style={{ ...iSt, resize: "none", marginBottom: 0 }} />
+              </>
+            )}
+            {itemModal.type === "whatsapp" && (
+              <input type="text" placeholder="WhatsApp గ్రూప్ లింక్" value={itemModal.form.link || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, link: e.target.value } }))} style={{ ...iSt, marginBottom: 0 }} />
+            )}
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button onClick={closeItemModal} style={{ flex: 1, padding: "12px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>రద్దు</button>
               <button onClick={saveItemModal} style={{ flex: 2, padding: "12px", background: "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✅ సేవ్ చేయి</button>
@@ -1058,8 +1114,17 @@ function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentIn
         alt="Post media" 
         style={{ width: "100%", height: "auto", maxHeight: 350, objectFit: "contain", display: "block" }} 
         onError={(e) => {
-          console.error("Image load error:", post.image);
-          e.target.style.display = 'none'; // ఇమేజ్ లింక్ విరిగిపోతే లేఅవుట్ పాడవకుండా చేస్తుంది
+          const img = e.target;
+          const isDataUrl = (post.image || "").startsWith("data:");
+          const tries = Number(img.dataset.retryCount || 0);
+          if (!isDataUrl && tries < 3) {
+            img.dataset.retryCount = String(tries + 1);
+            const base = (post.image || "").split("&_r=")[0];
+            setTimeout(() => { img.src = base + (base.includes("?") ? "&" : "?") + "_r=" + Date.now(); }, 1500);
+          } else {
+            console.error("Image load error:", post.image);
+            img.style.display = 'none'; // ఇమేజ్ లింక్ నిజంగా విరిగిపోతేనే లేఅవుట్ పాడవకుండా దాస్తుంది
+          }
         }}
       />
     )}
