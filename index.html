@@ -1242,8 +1242,13 @@ const iSt = { width: "100%", padding: "12px 14px", background: "rgba(255,255,255
 window.addEventListener("DOMContentLoaded", () => {
   const container = document.getElementById("root");
   if (container) {
+    setTimeout(() => {
+  const container = document.getElementById("root");
+  if (container && typeof ReactDOM !== "undefined") {
     const root = ReactDOM.createRoot(container);
     root.render(<App />);
+  }
+}, 50);
   }
 });
 </script>
