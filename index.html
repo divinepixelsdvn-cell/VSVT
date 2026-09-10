@@ -674,7 +674,7 @@ function App() {
                 onShare={() => handleShare(post)}
                 onComment={(text) => {
                   if (!text.trim()) return;
-                  const updated = posts.map(p => p.id === post.id ? { ...p, comments: [...p.comments, { user: currentUser?.name || "సభ్యుడు", text }] } : p);
+                  const updated = posts.map(p => p.id === post.id ? { ...p, comments: [...(p.comments || []), { user: currentUser?.name || "సభ్యుడు", text }] } : p);
                   setPosts(updated);
                   syncToShared(updated);
                 }}
@@ -1000,6 +1000,8 @@ function App() {
 
 function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentInput, onEdit, onDelete }) {
   const [showComments, setShowComments] = useState(false);
+  const commentsList = Array.isArray(post.comments) ? post.comments : [];
+
   return (
     <div style={{ background: "rgba(0,0,0,0.25)", border: "1px solid rgba(232,128,10,0.25)", borderRadius: 16, overflow: "hidden", marginBottom: 16 }}>
       <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
@@ -1013,14 +1015,15 @@ function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentIn
       </div>
       {post.image && <div style={{ width: "100%", maxHeight: 300, overflow: "hidden" }}><img src={post.image} alt="" style={{ width: "100%", objectFit: "cover", display: "block" }} /></div>}
       <div style={{ padding: "12px 14px 8px", fontSize: 13, color: "rgba(255,255,255,0.85)", lineHeight: 1.7 }}>{post.content}</div>
+      {post.blogLink && <div style={{ padding: "4px 14px 10px" }}><a href={post.blogLink} target="_blank" rel="noreferrer" style={{ color: "#f39c12", fontSize: 12, fontWeight: 600, textDecoration: "underline" }}>📖 బ్లాగ్ చదవండి →</a></div>}
       <div style={{ padding: "8px 14px 12px", display: "flex", gap: 8, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-        <ABt icon={post.liked ? "❤️" : "🤍"} label={`${post.likes}`} onClick={onLike} active={post.liked} />
-        <ABt icon="💬" label={`${post.comments.length}`} onClick={() => setShowComments(!showComments)} />
+        <ABt icon={post.liked ? "❤️" : "🤍"} label={`${post.likes || 0}`} onClick={onLike} active={post.liked} />
+        <ABt icon="💬" label={`${commentsList.length}`} onClick={() => setShowComments(!showComments)} />
         <ABt icon="📤" label="షేర్" onClick={onShare} />
       </div>
       {showComments && (
         <div style={{ padding: "0 14px 14px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-          {post.comments.map((c, i) => (
+          {commentsList.map((c, i) => (
             <div key={i} style={{ background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: "8px 12px", marginBottom: 6, marginTop: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "#e8800a" }}>{c.user}: </span>
               <span style={{ fontSize: 12, color: "rgba(255,255,255,0.8)" }}>{c.text}</span>
