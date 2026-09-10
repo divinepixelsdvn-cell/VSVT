@@ -1013,7 +1013,27 @@ function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentIn
         {onEdit && <button onClick={onEdit} style={{ background: "rgba(232,128,10,0.2)", border: "none", borderRadius: 8, padding: "5px 10px", color: "#f39c12", fontSize: 12, cursor: "pointer", marginRight: 6 }}>✏️</button>}
         {onDelete && <button onClick={onDelete} style={{ background: "rgba(220,50,50,0.2)", border: "none", borderRadius: 8, padding: "5px 10px", color: "#ff8080", fontSize: 12, cursor: "pointer" }}>🗑️</button>}
       </div>
-      {post.image && <div style={{ width: "100%", maxHeight: 300, overflow: "hidden" }}><img src={post.image} alt="" style={{ width: "100%", objectFit: "cover", display: "block" }} /></div>}
+      {post.image && (
+  <div style={{ width: "100%", maxHeight: 350, overflow: "hidden", borderRadius: 8, marginTop: 8, background: "#000" }}>
+    {post.type === "video" ? (
+      <video src={post.image} controls style={{ width: "100%", display: "block" }} />
+    ) : (
+      <img 
+        src={
+          post.image.includes("drive.google.com") && post.image.includes("/view")
+            ? post.image.replace("/view?usp=drivesdk", "/preview").replace("/view", "/preview")
+            : post.image
+        } 
+        alt="Post media" 
+        style={{ width: "100%", height: "auto", maxHeight: 350, objectFit: "contain", display: "block" }} 
+        onError={(e) => {
+          console.error("Image load error:", post.image);
+          e.target.style.display = 'none'; // ఇమేజ్ లింక్ విరిగిపోతే లేఅవుట్ పాడవకుండా చేస్తుంది
+        }}
+      />
+    )}
+  </div>
+)}
       <div style={{ padding: "12px 14px 8px", fontSize: 13, color: "rgba(255,255,255,0.85)", lineHeight: 1.7 }}>{post.content}</div>
       {post.blogLink && <div style={{ padding: "4px 14px 10px" }}><a href={post.blogLink} target="_blank" rel="noreferrer" style={{ color: "#f39c12", fontSize: 12, fontWeight: 600, textDecoration: "underline" }}>📖 బ్లాగ్ చదవండి →</a></div>}
       <div style={{ padding: "8px 14px 12px", display: "flex", gap: 8, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
