@@ -7,6 +7,18 @@
 <meta name="theme-color" content="#7b0000" />
 <link rel="manifest" href="manifest.json" />
 
+<!-- WhatsApp/సోషల్ మీడియా లో లింక్ షేర్ చేసినపుడు కనిపించే ప్రివ్యూ కోసం (Open Graph).
+     ఇది సైట్ మొత్తానికి ఒకే ప్రివ్యూ చూపిస్తుంది (ప్రతి పోస్ట్‌కి వేరే ఫోటో చూపించాలంటే సర్వర్ సైడ్ కోడ్ అవసరం అవుతుంది).
+     og:url మరియు og:image ని మీ అసలు డొమైన్/లోగో లింక్‌తో మార్చుకోండి. -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="శ్రీ వరసిద్ది వినాయక స్వామి వారి ఆలయం" />
+<meta property="og:title" content="శ్రీ వరసిద్ది వినాయక స్వామి వారి ఆలయం - సింగంపల్లి" />
+<meta property="og:description" content="ఆలయ నిర్మాణ అప్‌డేట్‌లు, కార్యక్రమాలు, ఫోటోలు & వీడియోలు చూడండి." />
+<meta property="og:image" content="https://REPLACE-WITH-YOUR-DOMAIN/temple-logo.jpg" />
+<meta property="og:url" content="https://REPLACE-WITH-YOUR-DOMAIN/" />
+<meta name="twitter:card" content="summary_large_image" />
+
+
 <!-- UMD React 18 Production Libraries -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -39,6 +51,7 @@ const MAIN_ADMINS = [
   { id: "9951551855", pwd: "Dvv@1417" },
 ];
 const DEFAULT_DRIVE_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbx1xOcl8F8vegFgM-ZhUGHGBn0jCWufkKMhGMGiIIvjwJp_zz0b069zH-B1eDGE4-Mt/exec";
+const DEFAULT_SHEET_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxw2M6voGIBw8ZGW0oSFwHQfzlNFgSY3Z-NgVCieDJF-SIxQNqHtlLaLYovF-8HzdmtbA/exec";
 const DEFAULT_FIREBASE_CONFIG_TEXT = `{
   apiKey: "AIzaSyCTbtNpLKfJSU5Cl0uzfEfd9qnLxE5q0mw",
   authDomain: "varasiddivinayakaapp.firebaseapp.com",
@@ -66,6 +79,7 @@ const STORAGE_KEYS = {
   info: "vt_public_info",
   donations: "vt_public_donations",
   whatsapp: "vt_public_whatsapp",
+  users: "vt_public_users",
 };
 
 async function sharedGet(key) {
@@ -117,6 +131,53 @@ async function cloudSet(key, val) {
   if (fbAvailable()) await fbSet(key, val);
 }
 
+// ---- Google Sheet సింక్ (దాతలు, కార్యక్రమాలు, ఇన్ఫో, విరాళాలు, యూజర్లు) ----
+const SHEET_SCHEMAS = {
+  Donors: ["id", "icon", "name", "wifeName", "childrenNames", "relation", "village", "area", "details", "photo"],
+  Events: ["id", "icon", "title", "date", "desc"],
+  Info: ["id", "icon", "title", "value"],
+  Donations: ["id", "icon", "title", "value", "desc"],
+  Users: ["phone", "name", "role", "photo"], // భద్రత కోసం పాస్‌వర్డ్ షీట్‌లో పెట్టడం లేదు
+  Posts: ["id", "author", "date", "content", "likes", "commentsCount", "comments", "shares"],
+};
+async function postItemsToSheet(sheetWebAppUrl, sheetName, items) {
+  if (!sheetWebAppUrl) return false;
+  try {
+    const schema = SHEET_SCHEMAS[sheetName] || Object.keys(items[0] || {});
+    const rows = (items || []).map(it => {
+      const row = {};
+      schema.forEach(k => { row[k] = (it[k] !== undefined && it[k] !== null) ? it[k] : ""; });
+      return row;
+    });
+    const res = await fetch(sheetWebAppUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ sheet: sheetName, items: rows }),
+    });
+    const json = await res.json();
+    return !!(json && json.ok);
+  } catch { return false; }
+}
+async function fetchAllFromSheet(sheetWebAppUrl) {
+  if (!sheetWebAppUrl) return null;
+  try {
+    const sep = sheetWebAppUrl.includes("?") ? "&" : "?";
+    const res = await fetch(sheetWebAppUrl + sep + "action=getAll");
+    const json = await res.json();
+    return (json && json.ok) ? json.data : null;
+  } catch { return null; }
+}
+function normalizeSheetRows(rows, schema) {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .map(r => {
+      const obj = {};
+      schema.forEach(k => { obj[k] = (r && r[k] !== undefined && r[k] !== null) ? String(r[k]) : ""; });
+      return obj;
+    })
+    .filter(obj => schema.some(k => obj[k] !== ""));
+}
+
 const INITIAL_POSTS = [
   {
     id: 1,
@@ -129,6 +190,7 @@ const INITIAL_POSTS = [
     likes: 142,
     comments: [{ user: "రాముడు", text: "జయ గణేశా! 🙏" }],
     liked: false,
+    shares: 0,
     blogLink: null
   }
 ];
@@ -164,8 +226,8 @@ const GALLERY = [
 ];
 
 const LAND_DONORS = [
-  { id: "d1", name: "శ్రీ రామకృష్ణ రెడ్డి", relation: "ముఖ్య స్థల దాత", village: "సింగంపల్లి", area: "40 సెంట్లు", details: "ఆలయ నిర్మాణానికి ప్రధాన స్థలం అందించారు", icon: "🏡" },
-  { id: "d2", name: "శ్రీమతి లక్ష్మీదేవమ్మ", relation: "సహాయ స్థల దాత", village: "సింగంపల్లి", area: "10 సెంట్లు", details: "ఆలయ ప్రాంగణ విస్తరణకు స్థలం అందించారు", icon: "🌿" }
+  { id: "d1", name: "శ్రీ రామకృష్ణ రెడ్డి", wifeName: "", childrenNames: "", relation: "ముఖ్య స్థల దాత", village: "సింగంపల్లి", area: "40 సెంట్లు", details: "ఆలయ నిర్మాణానికి ప్రధాన స్థలం అందించారు", icon: "🏡", photo: "" },
+  { id: "d2", name: "శ్రీమతి లక్ష్మీదేవమ్మ", wifeName: "", childrenNames: "", relation: "సహాయ స్థల దాత", village: "సింగంపల్లి", area: "10 సెంట్లు", details: "ఆలయ ప్రాంగణ విస్తరణకు స్థలం అందించారు", icon: "🌿", photo: "" }
 ];
 
 const INFO_ITEMS = [
@@ -203,9 +265,15 @@ function App() {
   const [infoItems, setInfoItems] = useState(() => lsGet("vt_info", INFO_ITEMS));
   const [donationItems, setDonationItems] = useState(() => lsGet("vt_donations", DONATION_ITEMS));
   const [whatsappLink, setWhatsappLink] = useState(() => lsGet("vt_whatsapp", ""));
+  const [autoShareWhatsapp, setAutoShareWhatsapp] = useState(() => lsGet("vt_auto_share_wa", true));
+  const [highlightPostId, setHighlightPostId] = useState(null);
   const [driveWebAppUrl, setDriveWebAppUrl] = useState(() => lsGet("vt_drive_webapp", DEFAULT_DRIVE_WEBAPP_URL));
   const [driveSettingsInput, setDriveSettingsInput] = useState(() => lsGet("vt_drive_webapp", DEFAULT_DRIVE_WEBAPP_URL));
   const [driveMsg, setDriveMsg] = useState("");
+  const [sheetWebAppUrl, setSheetWebAppUrl] = useState(() => lsGet("vt_sheet_webapp", DEFAULT_SHEET_WEBAPP_URL));
+  const [sheetSettingsInput, setSheetSettingsInput] = useState(() => lsGet("vt_sheet_webapp", DEFAULT_SHEET_WEBAPP_URL));
+  const [sheetMsg, setSheetMsg] = useState("");
+  const [sheetSyncMsg, setSheetSyncMsg] = useState("");
   const [firebaseConfigText, setFirebaseConfigText] = useState(() => lsGet("vt_firebase_config_text", DEFAULT_FIREBASE_CONFIG_TEXT));
   const [firebaseConfigInput, setFirebaseConfigInput] = useState(() => lsGet("vt_firebase_config_text", DEFAULT_FIREBASE_CONFIG_TEXT));
   const [firebaseMsg, setFirebaseMsg] = useState("");
@@ -214,6 +282,7 @@ function App() {
   const [itemModal, setItemModal] = useState(null);
   const [editingPostId, setEditingPostId] = useState(null);
   const galleryEditInputRef = useRef(null);
+  const donorPhotoInputRef = useRef(null);
 
   const [activeTab, setActiveTab] = useState("feed");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -222,32 +291,53 @@ function App() {
   const [newPost, setNewPost] = useState({ content: "", imageBase64: "", imagePreview: "", mediaType: "", uploading: false });
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const regPhotoInputRef = useRef(null);
+  const profilePhotoInputRef = useRef(null);
+  const [profileModal, setProfileModal] = useState(false);
+  const [profileForm, setProfileForm] = useState({ name: "", photo: "", photoUploading: false });
   const uploadPromiseRef = useRef(null);
   const [days, setDays] = useState(getDayCount());
-  const [selectedImage, setSelectedImage] = useState(null);
+  const [selectedMedia, setSelectedMedia] = useState(null);
   const [adminPanel, setAdminPanel] = useState(false);
   const menuRef = useRef(null);
-  const [authForm, setAuthForm] = useState({ name: "", phone: "", password: "" });
+  const [authForm, setAuthForm] = useState({ name: "", phone: "", password: "", photo: "", photoUploading: false });
   const [authError, setAuthError] = useState("");
   const [syncStatus, setSyncStatus] = useState("");
 
   useEffect(() => {
     (async () => {
-      const [sPosts, sEvents, sGallery, sDonors, sInfo, sDonations, sWhatsapp] = await Promise.all([
-        cloudGet(STORAGE_KEYS.posts),
-        cloudGet(STORAGE_KEYS.events),
-        cloudGet(STORAGE_KEYS.gallery),
-        cloudGet(STORAGE_KEYS.donors),
-        cloudGet(STORAGE_KEYS.info),
-        cloudGet(STORAGE_KEYS.donations),
-        cloudGet(STORAGE_KEYS.whatsapp),
+      // ఒక కేటగిరీ (ఉదా: గుడి ఇన్ఫో) లో ఉన్న అన్ని items ని డిలీట్ చేస్తే, ఆ array ఖాళీ ([]) అవుతుంది.
+      // Firebase లో ఖాళీ array ని సేవ్ చేస్తే అది కీ ని పూర్తిగా తొలగిస్తుంది — దాంతో మళ్ళీ పేజీ రిఫ్రెష్ అయినపుడు
+      // "డేటా ఇంకా లేదు" అనుకుని డిఫాల్ట్ డేటా మళ్ళీ నింపేది. దీన్ని ఆపడానికి ఒక్కసారి "seed" అయ్యిందా లేదా అని
+      // ప్రత్యేకంగా ఒక ఫ్లాగ్ తో ట్రాక్ చేస్తాం — అది true అయితే, ఖాళీగా ఉన్నా డిఫాల్ట్ డేటాతో మళ్ళీ నింపం.
+      const syncCategory = async (cloudKey, lsKey, def, setter) => {
+        const seedFlagKey = cloudKey + "__seeded";
+        const [val, seeded] = await Promise.all([cloudGet(cloudKey), cloudGet(seedFlagKey)]);
+        if (val && val.length > 0) {
+          setter(val);
+          lsSet(lsKey, val);
+          if (!seeded) cloudSet(seedFlagKey, true); // ముందు నుంచే ఉన్న డేటాకి ఫ్లాగ్ వెనక్కి సెట్ చేయటం
+        } else if (!seeded) {
+          const seedVal = lsGet(lsKey, def);
+          await cloudSet(cloudKey, seedVal);
+          await cloudSet(seedFlagKey, true);
+        } else {
+          // ఇంతకుముందు seed అయ్యింది, ఇప్పుడు ఉద్దేశపూర్వకంగా ఖాళీగా ఉంది — డిఫాల్ట్ డేటాతో నింపొద్దు
+          setter([]);
+          lsSet(lsKey, []);
+        }
+      };
+
+      await Promise.all([
+        syncCategory(STORAGE_KEYS.posts, "vt_posts", INITIAL_POSTS, setPosts),
+        syncCategory(STORAGE_KEYS.events, "vt_events", EVENTS, setEvents),
+        syncCategory(STORAGE_KEYS.gallery, "vt_gallery", GALLERY, setGallery),
+        syncCategory(STORAGE_KEYS.donors, "vt_donors", LAND_DONORS, setDonors),
+        syncCategory(STORAGE_KEYS.info, "vt_info", INFO_ITEMS, setInfoItems),
+        syncCategory(STORAGE_KEYS.donations, "vt_donations", DONATION_ITEMS, setDonationItems),
+        syncCategory(STORAGE_KEYS.users, "vt_users", [], setUsers),
       ]);
-      if (sPosts && sPosts.length > 0) { setPosts(sPosts); lsSet("vt_posts", sPosts); } else { await cloudSet(STORAGE_KEYS.posts, lsGet("vt_posts", INITIAL_POSTS)); }
-      if (sEvents && sEvents.length > 0) { setEvents(sEvents); lsSet("vt_events", sEvents); } else { await cloudSet(STORAGE_KEYS.events, lsGet("vt_events", EVENTS)); }
-      if (sGallery && sGallery.length > 0) { setGallery(sGallery); lsSet("vt_gallery", sGallery); } else { await cloudSet(STORAGE_KEYS.gallery, lsGet("vt_gallery", GALLERY)); }
-      if (sDonors && sDonors.length > 0) { setDonors(sDonors); lsSet("vt_donors", sDonors); } else { await cloudSet(STORAGE_KEYS.donors, lsGet("vt_donors", LAND_DONORS)); }
-      if (sInfo && sInfo.length > 0) { setInfoItems(sInfo); lsSet("vt_info", sInfo); } else { await cloudSet(STORAGE_KEYS.info, lsGet("vt_info", INFO_ITEMS)); }
-      if (sDonations && sDonations.length > 0) { setDonationItems(sDonations); lsSet("vt_donations", sDonations); } else { await cloudSet(STORAGE_KEYS.donations, lsGet("vt_donations", DONATION_ITEMS)); }
+      const sWhatsapp = await cloudGet(STORAGE_KEYS.whatsapp);
       if (typeof sWhatsapp === "string" && sWhatsapp) { setWhatsappLink(sWhatsapp); lsSet("vt_whatsapp", sWhatsapp); }
       setStorageReady(true);
     })();
@@ -255,15 +345,33 @@ function App() {
 
   useEffect(() => { lsSet("vt_posts", posts); }, [posts]);
   useEffect(() => { lsSet("vt_subadmins", subAdmins); }, [subAdmins]);
-  useEffect(() => { lsSet("vt_users", users); }, [users]);
+  useEffect(() => { lsSet("vt_users", users); if (storageReady) { cloudSet(STORAGE_KEYS.users, users); postItemsToSheet(sheetWebAppUrl, "Users", users); } }, [users, storageReady]);
   useEffect(() => { lsSet("vt_user", currentUser); }, [currentUser]);
-  useEffect(() => { lsSet("vt_events", events); if (storageReady) cloudSet(STORAGE_KEYS.events, events); }, [events, storageReady]);
+  useEffect(() => { lsSet("vt_events", events); if (storageReady) { cloudSet(STORAGE_KEYS.events, events); postItemsToSheet(sheetWebAppUrl, "Events", events); } }, [events, storageReady]);
   useEffect(() => { lsSet("vt_gallery", gallery); if (storageReady) cloudSet(STORAGE_KEYS.gallery, gallery); }, [gallery, storageReady]);
-  useEffect(() => { lsSet("vt_donors", donors); if (storageReady) cloudSet(STORAGE_KEYS.donors, donors); }, [donors, storageReady]);
-  useEffect(() => { lsSet("vt_info", infoItems); if (storageReady) cloudSet(STORAGE_KEYS.info, infoItems); }, [infoItems, storageReady]);
-  useEffect(() => { lsSet("vt_donations", donationItems); if (storageReady) cloudSet(STORAGE_KEYS.donations, donationItems); }, [donationItems, storageReady]);
+  useEffect(() => { lsSet("vt_donors", donors); if (storageReady) { cloudSet(STORAGE_KEYS.donors, donors); postItemsToSheet(sheetWebAppUrl, "Donors", donors); } }, [donors, storageReady]);
+  useEffect(() => { lsSet("vt_info", infoItems); if (storageReady) { cloudSet(STORAGE_KEYS.info, infoItems); postItemsToSheet(sheetWebAppUrl, "Info", infoItems); } }, [infoItems, storageReady]);
+  useEffect(() => { lsSet("vt_donations", donationItems); if (storageReady) { cloudSet(STORAGE_KEYS.donations, donationItems); postItemsToSheet(sheetWebAppUrl, "Donations", donationItems); } }, [donationItems, storageReady]);
   useEffect(() => { lsSet("vt_whatsapp", whatsappLink); if (storageReady) cloudSet(STORAGE_KEYS.whatsapp, whatsappLink); }, [whatsappLink, storageReady]);
+  useEffect(() => { lsSet("vt_auto_share_wa", autoShareWhatsapp); }, [autoShareWhatsapp]);
+
+  // లింక్ లో ?post=<id> ఉంటే (WhatsApp నుంచి షేర్ చేసిన లింక్ ఓపెన్ చేసినపుడు), నేరుగా ఫీడ్ కి వెళ్లి ఆ పోస్ట్ ని హైలైట్ చేస్తూ చూపిస్తుంది
+  useEffect(() => {
+    if (!storageReady || posts.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const pid = params.get("post");
+    if (!pid) return;
+    setActiveTab("feed");
+    setHighlightPostId(pid);
+    setTimeout(() => {
+      const el = document.getElementById("post-" + pid);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 350);
+    setTimeout(() => setHighlightPostId(null), 5000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageReady, posts.length]);
   useEffect(() => { lsSet("vt_drive_webapp", driveWebAppUrl); }, [driveWebAppUrl]);
+  useEffect(() => { lsSet("vt_sheet_webapp", sheetWebAppUrl); }, [sheetWebAppUrl]);
   useEffect(() => { lsSet("vt_firebase_config_text", firebaseConfigText); }, [firebaseConfigText]);
 
   useEffect(() => {
@@ -281,16 +389,70 @@ function App() {
   useEffect(() => {
     if (!firebaseReady) return;
     const unsubs = [
-      fbListen(STORAGE_KEYS.posts, (v) => { if (v) { setPosts(v); lsSet("vt_posts", v); } }),
-      fbListen(STORAGE_KEYS.events, (v) => { if (v) { setEvents(v); lsSet("vt_events", v); } }),
-      fbListen(STORAGE_KEYS.gallery, (v) => { if (v) { setGallery(v); lsSet("vt_gallery", v); } }),
-      fbListen(STORAGE_KEYS.donors, (v) => { if (v) { setDonors(v); lsSet("vt_donors", v); } }),
-      fbListen(STORAGE_KEYS.info, (v) => { if (v) { setInfoItems(v); lsSet("vt_info", v); } }),
-      fbListen(STORAGE_KEYS.donations, (v) => { if (v) { setDonationItems(v); lsSet("vt_donations", v); } }),
+      fbListen(STORAGE_KEYS.posts, (v) => { setPosts(Array.isArray(v) ? v : []); lsSet("vt_posts", Array.isArray(v) ? v : []); }),
+      fbListen(STORAGE_KEYS.events, (v) => { setEvents(Array.isArray(v) ? v : []); lsSet("vt_events", Array.isArray(v) ? v : []); }),
+      fbListen(STORAGE_KEYS.gallery, (v) => { setGallery(Array.isArray(v) ? v : []); lsSet("vt_gallery", Array.isArray(v) ? v : []); }),
+      fbListen(STORAGE_KEYS.donors, (v) => { setDonors(Array.isArray(v) ? v : []); lsSet("vt_donors", Array.isArray(v) ? v : []); }),
+      fbListen(STORAGE_KEYS.info, (v) => { setInfoItems(Array.isArray(v) ? v : []); lsSet("vt_info", Array.isArray(v) ? v : []); }),
+      fbListen(STORAGE_KEYS.donations, (v) => { setDonationItems(Array.isArray(v) ? v : []); lsSet("vt_donations", Array.isArray(v) ? v : []); }),
+      fbListen(STORAGE_KEYS.users, (v) => { setUsers(Array.isArray(v) ? v : []); lsSet("vt_users", Array.isArray(v) ? v : []); }),
       fbListen(STORAGE_KEYS.whatsapp, (v) => { if (typeof v === "string") { setWhatsappLink(v); lsSet("vt_whatsapp", v); } }),
     ];
     return () => unsubs.forEach((u) => u());
   }, [firebaseReady]);
+
+  // Google Sheet లో నేరుగా చేసిన మార్పులను కూడా యాప్‌లోకి తీసుకొచ్చే పోలింగ్ (ప్రతి 25 సెకన్లకు)
+  useEffect(() => {
+    if (!sheetWebAppUrl) return;
+    let stopped = false;
+
+    const applyListIfChanged = (schema, incomingRaw, lsKey, cloudKey, setter) => {
+      const incoming = normalizeSheetRows(incomingRaw, schema);
+      setter(prev => {
+        const norm = (arr) => JSON.stringify(
+          arr.map(o => schema.reduce((a, k) => { a[k] = (o[k] !== undefined && o[k] !== null) ? String(o[k]) : ""; return a; }, {}))
+             .sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")))
+        );
+        if (norm(prev) === norm(incoming)) return prev;
+        lsSet(lsKey, incoming);
+        cloudSet(cloudKey, incoming);
+        return incoming;
+      });
+    };
+
+    // యూజర్లకు పాస్‌వర్డ్/పర్మిషన్స్ షీట్‌లో ఉండవు కాబట్టి, పేరు/రోల్ మాత్రమే షీట్ నుంచి తీసుకుని,
+    // మిగతా (పాస్‌వర్డ్, పర్మిషన్స్) యాప్‌లో ఇప్పటికే ఉన్నవాటినే కాపాడతాం.
+    const applyUsersIfChanged = (incomingRaw) => {
+      const incoming = normalizeSheetRows(incomingRaw, SHEET_SCHEMAS.Users);
+      setUsers(prev => {
+        const merged = incoming.map(row => {
+          const existing = prev.find(u => u.phone === row.phone);
+          return existing
+            ? { ...existing, name: row.name || existing.name, role: row.role || existing.role }
+            : { name: row.name, phone: row.phone, role: row.role || "user", password: "", permissions: undefined };
+        });
+        const norm = (arr) => JSON.stringify(arr.map(u => ({ name: u.name, phone: u.phone, role: u.role })).sort((a, b) => a.phone.localeCompare(b.phone)));
+        if (norm(prev) === norm(merged)) return prev;
+        lsSet("vt_users", merged);
+        cloudSet(STORAGE_KEYS.users, merged);
+        return merged;
+      });
+    };
+
+    const poll = async () => {
+      const data = await fetchAllFromSheet(sheetWebAppUrl);
+      if (!data || stopped) return;
+      if (data.Donors) applyListIfChanged(SHEET_SCHEMAS.Donors, data.Donors, "vt_donors", STORAGE_KEYS.donors, setDonors);
+      if (data.Events) applyListIfChanged(SHEET_SCHEMAS.Events, data.Events, "vt_events", STORAGE_KEYS.events, setEvents);
+      if (data.Info) applyListIfChanged(SHEET_SCHEMAS.Info, data.Info, "vt_info", STORAGE_KEYS.info, setInfoItems);
+      if (data.Donations) applyListIfChanged(SHEET_SCHEMAS.Donations, data.Donations, "vt_donations", STORAGE_KEYS.donations, setDonationItems);
+      if (data.Users) applyUsersIfChanged(data.Users);
+      setSheetSyncMsg("✅ షీట్‌తో సింక్ అయింది — " + new Date().toLocaleTimeString("te-IN"));
+    };
+    poll();
+    const iv = setInterval(poll, 25000);
+    return () => { stopped = true; clearInterval(iv); };
+  }, [sheetWebAppUrl]);
 
   useEffect(() => {
     const t = setInterval(() => setDays(getDayCount()), 60000);
@@ -313,19 +475,77 @@ function App() {
     return false;
   };
 
+  const handleRegPhotoFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      setAuthForm(prev => ({ ...prev, photo: dataUrl, photoUploading: !!driveWebAppUrl }));
+      if (driveWebAppUrl) {
+        uploadToDrive(dataUrl, file.name).then(async (result) => {
+          let finalUrl = dataUrl;
+          if (result) {
+            const candidateUrl = result.directUrl || result.previewUrl;
+            const ok = await verifyImageUrl(candidateUrl);
+            finalUrl = ok ? candidateUrl : dataUrl;
+          }
+          setAuthForm(prev => (prev.photo === dataUrl ? { ...prev, photo: finalUrl, photoUploading: false } : prev));
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleProfilePhotoFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      setProfileForm(prev => ({ ...prev, photo: dataUrl, photoUploading: !!driveWebAppUrl }));
+      if (driveWebAppUrl) {
+        uploadToDrive(dataUrl, file.name).then(async (result) => {
+          let finalUrl = dataUrl;
+          if (result) {
+            const candidateUrl = result.directUrl || result.previewUrl;
+            const ok = await verifyImageUrl(candidateUrl);
+            finalUrl = ok ? candidateUrl : dataUrl;
+          }
+          setProfileForm(prev => (prev.photo === dataUrl ? { ...prev, photo: finalUrl, photoUploading: false } : prev));
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const openProfileEdit = () => {
+    setProfileForm({ name: currentUser?.name || "", photo: currentUser?.photo || "", photoUploading: false });
+    setProfileModal(true);
+    setMenuOpen(false);
+  };
+
+  const handleSaveProfile = () => {
+    if (!profileForm.name.trim()) { alert("పేరు నమోదు చేయండి"); return; }
+    if (profileForm.photoUploading) { alert("ఫోటో అప్‌లోడ్ అవుతోంది, కొద్ది క్షణాలు వేచి ఉండండి..."); return; }
+    const updatedUser = { ...currentUser, name: profileForm.name.trim(), photo: profileForm.photo || null };
+    setCurrentUser(updatedUser);
+    setUsers(users.map(u => u.phone === currentUser.phone ? { ...u, name: updatedUser.name, photo: updatedUser.photo } : u));
+    setProfileModal(false);
+  };
+
   const handleRegister = () => {
     setAuthError("");
     if (!authForm.name.trim()) { setAuthError("పేరు నమోదు చేయండి"); return; }
     if (!/^\d{10}$/.test(authForm.phone)) { setAuthError("10 అంకెల ఫోన్ నెంబర్ నమోదు చేయండి"); return; }
     if (!authForm.password || authForm.password.length < 4 || authForm.password.length > 8) { setAuthError("పాస్వర్డ్ 4-8 అక్షరాలు ఉండాలి"); return; }
+    if (authForm.photoUploading) { setAuthError("ఫోటో అప్‌లోడ్ అవుతోంది, కొద్ది క్షణాలు వేచి ఉండండి..."); return; }
     if (users.find(u => u.phone === authForm.phone)) { setAuthError("ఈ నెంబర్ ఇప్పటికే నమోదు అయింది"); return; }
     const isDesignated = subAdmins.find(a => a.phone === authForm.phone);
     const role = isDesignated ? "sub_admin" : "user";
-    const newUser = { name: authForm.name, phone: authForm.phone, password: authForm.password, role, permissions: isDesignated ? isDesignated.permissions : undefined };
+    const newUser = { name: authForm.name, phone: authForm.phone, password: authForm.password, photo: authForm.photo || null, role, permissions: isDesignated ? isDesignated.permissions : undefined };
     setUsers([...users, newUser]);
     setCurrentUser(newUser);
     setScreen("main");
-    setAuthForm({ name: "", phone: "", password: "" });
+    setAuthForm({ name: "", phone: "", password: "", photo: "", photoUploading: false });
   };
 
   const handleLogin = () => {
@@ -354,6 +574,17 @@ function App() {
   const syncToShared = async (updatedPosts) => {
     setSyncStatus("సింక్ అవుతోంది...");
     await cloudSet(STORAGE_KEYS.posts, updatedPosts);
+    const sheetRows = updatedPosts.map(p => ({
+      id: p.id,
+      author: p.author,
+      date: p.date,
+      content: p.content,
+      likes: p.likes,
+      commentsCount: (p.comments || []).length,
+      comments: JSON.stringify(p.comments || []),
+      shares: p.shares || 0,
+    }));
+    postItemsToSheet(sheetWebAppUrl, "Posts", sheetRows);
     setSyncStatus("✅ అందరికీ కనిపించేలా సింక్ అయింది!");
     setTimeout(() => setSyncStatus(""), 2500);
   };
@@ -405,16 +636,29 @@ function App() {
         likes: 0,
         comments: [],
         liked: false,
+        shares: 0,
         blogLink: null,
         uploading: !!pendingUpload
       };
       updated = [p, ...posts];
+      // పోస్ట్ చేసిన వెంటనే (ఎడిట్ చేసినపుడు కాదు, కొత్త పోస్ట్ అయినపుడు మాత్రమే) WhatsApp గ్రూప్ కి షేర్ చేసే షీట్ ని తెరుస్తుంది
+      shareToWhatsappGroup(p);
     }
     setPosts(updated);
     setNewPost({ content: "", imageBase64: "", imagePreview: "", mediaType: "", uploading: false });
     setEditingPostId(null);
     setPostModal(false);
     await syncToShared(updated);
+
+    // పోస్ట్‌లో పెట్టిన ప్రతి ఫోటో/వీడియో "మీడియా" సెక్షన్‌లో కూడా "ఫీడ్ పోస్టులు" ఫోల్డర్‌లో కనిపించేలా కాపీ చేస్తాం.
+    if (localImage) {
+      const galleryId = "feed_" + targetId;
+      setGallery(prev => {
+        const exists = prev.some(g => g.id === galleryId);
+        if (exists) return prev.map(g => g.id === galleryId ? { ...g, url: localImage, type: localType } : g);
+        return [{ id: galleryId, url: localImage, type: localType, folder: "ఫీడ్ పోస్టులు" }, ...prev];
+      });
+    }
 
     if (pendingUpload) {
       uploadPromiseRef.current = null;
@@ -424,6 +668,10 @@ function App() {
           syncToShared(next);
           return next;
         });
+        if (finalUrl) {
+          const galleryId = "feed_" + targetId;
+          setGallery(prev => prev.map(g => g.id === galleryId ? { ...g, url: finalUrl } : g));
+        }
       });
     }
   };
@@ -435,6 +683,43 @@ function App() {
     setPostModal(true);
   };
 
+  // ఒక పోస్ట్ కి WhatsApp లో పంపే మెసేజ్ టెక్స్ట్ + డీప్-లింక్ తయారు చేస్తుంది (ఎప్పుడూ "మెయిన్ అడ్మిన్" పేరుతోనే కనిపిస్తుంది)
+  const buildShareMessage = (post) => {
+    const kindLabel = post.type === "video" ? "వీడియో" : post.type === "image" ? "ఫోటో" : "అప్‌డేట్";
+    const link = `${window.location.origin}${window.location.pathname}?post=${post.id}`;
+    const text = `🛕 ${TEMPLE_NAME_LINE1}\n👑 మెయిన్ అడ్మిన్ కొత్త ${kindLabel} పోస్ట్ చేశారు:\n\n"${post.content}"\n\n👉 పూర్తిగా చూడటానికి: ${link}`;
+    return { text, link };
+  };
+
+  // పోస్ట్ చేసిన వెంటనే, కాన్ఫిగర్ చేసిన WhatsApp గ్రూప్ కి షేర్ చేయడానికి పరికరం (OS) షేర్ షీట్ ని తెరుస్తుంది.
+  // గమనిక: WhatsApp/ఏ ప్లాట్‌ఫారమైనా, భద్రత కారణాల వల్ల ఏ వెబ్‌సైట్ కూడా టैप్ లేకుండా నేరుగా గ్రూప్ కి మెసేజ్ పంపడానికి అనుమతించదు —
+  // కాబట్టి ఇది షేర్ షీట్ ని ఆటోమేటిక్‌గా తెరిచి, గ్రూప్ ని ఎంచుకుని ఒక్క టैప్ తో పంపేలా సిద్ధం చేస్తుంది.
+  const shareToWhatsappGroup = async (post) => {
+    if (!autoShareWhatsapp || !whatsappLink) return;
+    const { text, link } = buildShareMessage(post);
+
+    // ఫోటో/వీడియో ఇంకా లోకల్ డేటా-URL గా ఉంటే (Drive అప్‌లోడ్ కాకముందే), దాన్ని ఫైల్‌గా జతచేసి పంపే ప్రయత్నం —
+    // దీనివల్ల WhatsApp చాట్‌లో నిజమైన థంబ్‌నెయిల్ కనిపిస్తుంది. నెట్‌వర్క్ లింక్‌లతో ఆలస్యం వల్ల షేర్ అనుమతి పోకుండా ఉండేందుకు దీన్ని data: URL లకే పరిమితం చేశాం.
+    if (post.image && post.image.startsWith("data:") && navigator.canShare && navigator.share) {
+      try {
+        const blob = await (await fetch(post.image)).blob();
+        const ext = post.type === "video" ? "mp4" : "jpg";
+        const file = new File([blob], `post-${post.id}.${ext}`, { type: blob.type || (post.type === "video" ? "video/mp4" : "image/jpeg") });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: TEMPLE_NAME_LINE1, text });
+          return;
+        }
+      } catch (err) { /* మీడియా ఫైల్‌గా షేర్ కుదరకపోతే కింద టెక్స్ట్+లింక్ షేర్‌కి వెళ్తాం */ }
+    }
+
+    if (navigator.share) {
+      try { await navigator.share({ title: TEMPLE_NAME_LINE1, text, url: link }); } catch (err) { /* యూజర్ షేర్ షీట్ ని రద్దు చేసుకుంటే ఇక్కడితో ఆగిపోతుంది */ }
+      return;
+    }
+    // Share API లేని బ్రౌజర్లకు (ఉదా: డెస్క్‌టాప్) ఫాల్‌బ్యాక్ — WhatsApp వెబ్/యాప్ ఫార్వర్డ్ స్క్రీన్ తెరుస్తుంది, అక్కడ గ్రూప్ ఎంచుకుని పంపొచ్చు
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+  };
+
   const handleShare = (post) => {
     const text = post.blogLink ? `${post.content}\n\nమరిన్ని వివరాలు: ${post.blogLink}` : post.content;
     if (navigator.share) {
@@ -443,6 +728,9 @@ function App() {
       navigator.clipboard?.writeText(text);
       alert("పోస్ట్ కాపీ అయింది!");
     }
+    const updated = posts.map(p => p.id === post.id ? { ...p, shares: (p.shares || 0) + 1 } : p);
+    setPosts(updated);
+    syncToShared(updated);
   };
 
   const uploadToDrive = async (dataUrl, filename) => {
@@ -513,8 +801,8 @@ function App() {
   const ITEM_SETTERS = { event: setEvents, gallery: setGallery, donor: setDonors, info: setInfoItems, donation: setDonationItems };
   const ITEM_DEFAULTS = {
     event: { title: "", desc: "", date: new Date().toISOString().slice(0, 10), icon: "🛕" },
-    gallery: { url: "", base64: "" },
-    donor: { name: "", relation: "", village: "", area: "", details: "", icon: "🏡" },
+    gallery: { url: "", base64: "", folder: "నిర్మాణ ఫోటోలు", mediaType: "image" },
+    donor: { name: "", wifeName: "", childrenNames: "", relation: "", village: "", area: "", details: "", icon: "🏡", photo: "" },
     info: { icon: "📅", title: "", value: "" },
     donation: { icon: "📱", title: "", value: "", desc: "" },
     whatsapp: { link: "" },
@@ -535,7 +823,7 @@ function App() {
     if (!itemModal) return;
     const { type, mode, id, form } = itemModal;
     if (!hasPerm(TYPE_TO_CATEGORY[type], mode === "add" ? "add" : "edit")) { closeItemModal(); return; }
-    if (form.uploading) { alert("అప్‌లోడ్ పూర్తయ్యే వరకూ వేచి ఉండండి..."); return; }
+    if (form.uploading || form.uploadingPhoto) { alert("అప్‌లోడ్ పూర్తయ్యే వరకూ వేచి ఉండండి..."); return; }
     if (type === "whatsapp") {
       if (!form.link?.trim()) { alert("గ్రూప్ లింక్ నమోదు చేయండి"); return; }
       setWhatsappLink(form.link.trim());
@@ -550,12 +838,14 @@ function App() {
     const setter = ITEM_SETTERS[type];
     setter(prev => {
       if (mode === "add") {
-        const newItem = type === "gallery" ? { id: makeId(), url: form.base64 || form.url } : { ...form, id: makeId() };
+        const newItem = type === "gallery"
+          ? { id: makeId(), url: form.base64 || form.url, type: form.mediaType || "image", folder: (form.folder || "నిర్మాణ ఫోటోలు").trim() }
+          : { ...form, id: makeId() };
         return [newItem, ...prev];
       } else {
         return prev.map(it => {
           if (it.id !== id) return it;
-          if (type === "gallery") return { ...it, url: form.base64 || form.url || it.url };
+          if (type === "gallery") return { ...it, url: form.base64 || form.url || it.url, type: form.mediaType || it.type || "image", folder: (form.folder || it.folder || "నిర్మాణ ఫోటోలు").trim() };
           return { ...it, ...form };
         });
       }
@@ -572,17 +862,39 @@ function App() {
 
   const handleItemImageFile = (file) => {
     if (!file || !itemModal) return;
+    const mediaType = file.type.startsWith("video") ? "video" : "image";
     const reader = new FileReader();
-    reader.onload = async (e) => {
+    reader.onload = (e) => {
       const dataUrl = e.target.result;
-      setItemModal(m => m && ({ ...m, form: { ...m.form, base64: dataUrl, uploading: !!driveWebAppUrl } }));
+      setItemModal(m => m && ({ ...m, form: { ...m.form, base64: dataUrl, mediaType, uploading: !!driveWebAppUrl } }));
       if (driveWebAppUrl) {
-        const result = await uploadToDrive(dataUrl, file.name);
-        if (result) {
-          setItemModal(m => m && ({ ...m, form: { ...m.form, base64: result.directUrl || result.previewUrl, uploading: false } }));
-        } else {
-          setItemModal(m => m && ({ ...m, form: { ...m.form, uploading: false } }));
-        }
+        uploadToDrive(dataUrl, file.name).then(async result => {
+          const candidateUrl = result ? (mediaType === "video" ? result.previewUrl : (result.directUrl || result.previewUrl)) : null;
+          let finalUrl = dataUrl;
+          if (candidateUrl) {
+            if (mediaType === "video") finalUrl = candidateUrl;
+            else finalUrl = (await verifyImageUrl(candidateUrl)) ? candidateUrl : dataUrl;
+          }
+          setItemModal(m => (m && m.form.base64 === dataUrl) ? { ...m, form: { ...m.form, base64: finalUrl, uploading: false } } : m);
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // స్థల దాత యొక్క చిన్న రౌండ్ ఫోటో అప్‌లోడ్ చేయడానికి (ఐచ్ఛికం)
+  const handleDonorPhotoFile = (file) => {
+    if (!file || !itemModal) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      setItemModal(m => m && ({ ...m, form: { ...m.form, photo: dataUrl, uploadingPhoto: !!driveWebAppUrl } }));
+      if (driveWebAppUrl) {
+        uploadToDrive(dataUrl, file.name).then(async result => {
+          const candidateUrl = result ? (result.directUrl || result.previewUrl) : null;
+          const finalUrl = candidateUrl ? ((await verifyImageUrl(candidateUrl)) ? candidateUrl : dataUrl) : dataUrl;
+          setItemModal(m => (m && m.form.photo === dataUrl) ? { ...m, form: { ...m.form, photo: finalUrl, uploadingPhoto: false } } : m);
+        });
       }
     };
     reader.readAsDataURL(file);
@@ -593,6 +905,13 @@ function App() {
     setDriveMsg(url ? "✅ Google Drive లింక్ సేవ్ అయింది!" : "🗑️ తీసివేయబడింది.");
     setDriveWebAppUrl(url);
     setTimeout(() => setDriveMsg(""), 3500);
+  };
+
+  const handleSaveSheetUrl = () => {
+    const url = sheetSettingsInput.trim();
+    setSheetMsg(url ? "✅ Google Sheet లింక్ సేవ్ అయింది!" : "🗑️ తీసివేయబడింది.");
+    setSheetWebAppUrl(url);
+    setTimeout(() => setSheetMsg(""), 3500);
   };
 
   const handleSaveFirebaseConfig = () => {
@@ -658,6 +977,20 @@ function App() {
             ))}
           </div>
           {authMode === "register" && <input type="text" placeholder="మీ పూర్తి పేరు" value={authForm.name} onChange={e => setAuthForm({ ...authForm, name: e.target.value })} style={iSt} />}
+          {authMode === "register" && (
+            <div style={{ marginBottom: 12 }}>
+              <input ref={regPhotoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleRegPhotoFile(e.target.files[0])} />
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div onClick={() => regPhotoInputRef.current?.click()} style={{ width: 52, height: 52, borderRadius: 26, background: authForm.photo ? `url(${authForm.photo}) center/cover` : "rgba(255,255,255,0.1)", border: "1px solid rgba(232,128,10,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, cursor: "pointer", flexShrink: 0 }}>
+                  {!authForm.photo && "👤"}
+                </div>
+                <button onClick={() => regPhotoInputRef.current?.click()} style={{ flex: 1, padding: "10px 12px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(232,128,10,0.35)", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  {authForm.photoUploading ? "☁️ అప్‌లోడ్ అవుతోంది..." : authForm.photo ? "📷 ఫోటో మార్చండి" : "📷 ఫోటో జోడించండి (ఐచ్ఛికం)"}
+                </button>
+                {authForm.photo && <button onClick={() => setAuthForm({ ...authForm, photo: "", photoUploading: false })} style={{ background: "rgba(220,50,50,0.2)", border: "none", borderRadius: 8, width: 32, height: 32, color: "#ff8080", fontSize: 14, cursor: "pointer" }}>✕</button>}
+              </div>
+            </div>
+          )}
           <input type={authMode === "login" ? "text" : "tel"} placeholder={authMode === "login" ? "ఫోన్ నెంబర్ లేదా User ID" : "ఫోన్ నెంబర్ (10 అంకెలు)"} value={authForm.phone} onChange={e => setAuthForm({ ...authForm, phone: e.target.value })} style={iSt} />
           <input type="password" placeholder={authMode === "register" ? "పాస్వర్డ్ (4-8 అక్షరాలు)" : "పాస్వర్డ్"} value={authForm.password} onChange={e => setAuthForm({ ...authForm, password: e.target.value })} style={{ ...iSt, marginBottom: 0 }} />
           {authError && <div style={{ color: "#ffcdd2", fontSize: 12, marginTop: 10, textAlign: "center" }}>{authError}</div>}
@@ -723,6 +1056,7 @@ function App() {
             {!storageReady && <div style={{ textAlign: "center", color: "rgba(255,255,255,0.5)", fontSize: 12, padding: 20 }}>లోడ్ అవుతోంది...</div>}
             {posts.map(post => (
               <PostCard key={post.id} post={post}
+                highlighted={highlightPostId != null && String(post.id) === String(highlightPostId)}
                 onLike={() => handleLike(post.id)}
                 onShare={() => handleShare(post)}
                 onComment={(text) => {
@@ -807,13 +1141,21 @@ function App() {
               {donors.map((donor) => (
                 <div key={donor.id} style={{ background: "rgba(255,215,0,0.06)", border: "1px solid rgba(255,215,0,0.2)", borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                    <span style={{ fontSize: 24 }}>{donor.icon}</span>
+                    {donor.photo ? (
+                      <img src={donor.photo} alt={donor.name} style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(255,215,0,0.5)", flexShrink: 0 }} />
+                    ) : (
+                      <span style={{ fontSize: 24 }}>{donor.icon}</span>
+                    )}
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 14, fontWeight: 800, color: "#FFD700" }}>{donor.name}</div>
                       <div style={{ fontSize: 11, color: "rgba(255,215,0,0.7)" }}>{donor.relation}</div>
                     </div>
                   </div>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", lineHeight: 1.7 }}>📍 గ్రామం: {donor.village}<br />📐 స్థల వైశాల్యం: {donor.area}<br />ℹ️ {donor.details}</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", lineHeight: 1.7 }}>
+                    {donor.wifeName && <>👰 భార్య: {donor.wifeName}<br /></>}
+                    {donor.childrenNames && <>👨‍👩‍👧‍👦 పిల్లలు: {donor.childrenNames}<br /></>}
+                    📍 గ్రామం: {donor.village}<br />📐 స్థల వైశాల్యం: {donor.area}<br />ℹ️ {donor.details}
+                  </div>
                   {(hasPerm("info", "edit") || hasPerm("info", "delete")) && (
                     <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                       {hasPerm("info", "edit") && <button onClick={() => openEditItem("donor", donor)} style={{ background: "rgba(232,128,10,0.2)", border: "none", borderRadius: 8, padding: "5px 10px", color: "#f39c12", fontSize: 11, cursor: "pointer" }}>✏️ ఎడిట్</button>}
@@ -843,6 +1185,12 @@ function App() {
                   )}
                 </div>
               )}
+              {isMainAdmin && whatsappLink && (
+                <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(37,211,102,0.25)", cursor: "pointer" }}>
+                  <input type="checkbox" checked={autoShareWhatsapp} onChange={e => setAutoShareWhatsapp(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#25D366" }} />
+                  <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.75)", lineHeight: 1.5 }}>📤 కొత్త పోస్ట్ చేసిన వెంటనే ఈ గ్రూప్‌కి షేర్ చేసే స్క్రీన్ ఆటోమేటిక్‌గా తెరవాలి (గ్రూప్ ఎంచుకుని పంపడం మాత్రం మీరే చేయాలి — WhatsApp భద్రత కోసం టैప్ లేకుండా ఏ యాప్‌నీ నేరుగా పంపనివ్వదు)</span>
+                </label>
+              )}
             </div>
           </div>
         )}
@@ -853,26 +1201,58 @@ function App() {
             {hasPerm("gallery", "add") && (
               <button onClick={() => openAddItem("gallery")} style={{ width: "100%", background: "rgba(255,215,0,0.12)", border: "1px solid rgba(255,215,0,0.4)", borderRadius: 12, padding: "12px", color: "#FFD700", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 14 }}>➕ కొత్త ఫోటో జోడించండి</button>
             )}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {gallery.map((img, i) => (
-                <div key={img.id} style={{ position: "relative", borderRadius: 12, overflow: "hidden", aspectRatio: "1", border: "1px solid rgba(232,128,10,0.3)" }}>
-                  <img onClick={() => setSelectedImage(img.url)} src={img.url} alt={`నిర్మాణం ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", cursor: "pointer" }} />
-                  {(hasPerm("gallery", "edit") || hasPerm("gallery", "delete")) && (
-                    <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 6 }}>
-                      {hasPerm("gallery", "edit") && <button onClick={() => openEditItem("gallery", img)} style={{ background: "rgba(0,0,0,0.65)", border: "none", borderRadius: 7, width: 26, height: 26, color: "#f39c12", fontSize: 12, cursor: "pointer" }}>✏️</button>}
-                      {hasPerm("gallery", "delete") && <button onClick={() => deleteContentItem("gallery", img.id)} style={{ background: "rgba(0,0,0,0.65)", border: "none", borderRadius: 7, width: 26, height: 26, color: "#ff8080", fontSize: 12, cursor: "pointer" }}>🗑️</button>}
-                    </div>
-                  )}
+            {(() => {
+              const folderOrder = [];
+              const grouped = {};
+              gallery.forEach(item => {
+                const folder = (item.folder || "నిర్మాణ ఫోటోలు").trim();
+                if (!grouped[folder]) { grouped[folder] = []; folderOrder.push(folder); }
+                grouped[folder].push(item);
+              });
+              // "ఫీడ్ పోస్టులు" ఫోల్డర్ ఎప్పుడూ మొదట కనిపించేలా
+              folderOrder.sort((a, b) => (a === "ఫీడ్ పోస్టులు" ? -1 : b === "ఫీడ్ పోస్టులు" ? 1 : 0));
+              return folderOrder.map(folder => (
+                <div key={folder} style={{ marginBottom: 22 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: "#f39c12" }}>📁 {folder}</span>
+                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>({grouped[folder].length})</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {grouped[folder].map((img, i) => (
+                      <div key={img.id} style={{ position: "relative", borderRadius: 12, overflow: "hidden", aspectRatio: "1", border: "1px solid rgba(232,128,10,0.3)", background: "#000" }}>
+                        {img.type === "video" ? (
+                          <video onClick={() => setSelectedMedia({ url: img.url, type: "video" })} src={img.url} muted style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", cursor: "pointer" }} />
+                        ) : (
+                          <img onClick={() => setSelectedMedia({ url: img.url, type: "image" })} src={img.url} alt={`${folder} ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", cursor: "pointer" }} />
+                        )}
+                        {img.type === "video" && (
+                          <div onClick={() => setSelectedMedia({ url: img.url, type: "video" })} style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", pointerEvents: "none" }}>
+                            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>▶️</div>
+                          </div>
+                        )}
+                        {(hasPerm("gallery", "edit") || hasPerm("gallery", "delete")) && (
+                          <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 6 }}>
+                            {hasPerm("gallery", "edit") && <button onClick={() => openEditItem("gallery", img)} style={{ background: "rgba(0,0,0,0.65)", border: "none", borderRadius: 7, width: 26, height: 26, color: "#f39c12", fontSize: 12, cursor: "pointer" }}>✏️</button>}
+                            {hasPerm("gallery", "delete") && <button onClick={() => deleteContentItem("gallery", img.id)} style={{ background: "rgba(0,0,0,0.65)", border: "none", borderRadius: 7, width: 26, height: 26, color: "#ff8080", fontSize: 12, cursor: "pointer" }}>🗑️</button>}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
-            {selectedImage && (
-              <div onClick={() => setSelectedImage(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999, padding: 20 }}>
+              ));
+            })()}
+            {selectedMedia && (
+              <div onClick={() => setSelectedMedia(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999, padding: 20 }}>
                 <div onClick={e => e.stopPropagation()} style={{ maxWidth: 440, width: "100%" }}>
-                  <img src={selectedImage} alt="" style={{ width: "100%", borderRadius: 14, display: "block" }} />
+                  {selectedMedia.type === "video" ? (
+                    <video src={selectedMedia.url} controls autoPlay style={{ width: "100%", borderRadius: 14, display: "block" }} />
+                  ) : (
+                    <img src={selectedMedia.url} alt="" style={{ width: "100%", borderRadius: 14, display: "block" }} />
+                  )}
                   <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-                    <a href={selectedImage} download="temple_photo.jpg" style={{ flex: 1, background: "#e8800a", color: "#fff", textDecoration: "none", padding: "12px", borderRadius: 10, textAlign: "center", fontSize: 13, fontWeight: 700 }}>⬇️ డౌన్లోడ్</a>
-                    <button onClick={() => setSelectedImage(null)} style={{ flex: 1, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", padding: "12px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✕ మూసివేయి</button>
+                    <a href={selectedMedia.url} download={selectedMedia.type === "video" ? "temple_video.mp4" : "temple_photo.jpg"} style={{ flex: 1, background: "#e8800a", color: "#fff", textDecoration: "none", padding: "12px", borderRadius: 10, textAlign: "center", fontSize: 13, fontWeight: 700 }}>⬇️ డౌన్లోడ్</a>
+                    <button onClick={() => setSelectedMedia(null)} style={{ flex: 1, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", padding: "12px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✕ మూసివేయి</button>
                   </div>
                 </div>
               </div>
@@ -917,8 +1297,8 @@ function App() {
           <div ref={menuRef} style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 260, background: "linear-gradient(180deg, #7b0000 0%, #c0392b 100%)", borderLeft: "1px solid rgba(232,128,10,0.4)", display: "flex", flexDirection: "column" }}>
             <div style={{ background: "linear-gradient(135deg, #c0392b, #e67e22)", padding: "24px 20px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 44, height: 44, background: "rgba(255,255,255,0.2)", borderRadius: 22, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>
-                  {isMainAdmin ? "👑" : isSubAdmin ? "✍️" : "👤"}
+                <div style={{ width: 44, height: 44, borderRadius: 22, background: currentUser?.photo ? `url(${currentUser.photo}) center/cover` : "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>
+                  {!currentUser?.photo && (isMainAdmin ? "👑" : isSubAdmin ? "✍️" : "👤")}
                 </div>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{currentUser?.name}</div>
@@ -928,6 +1308,9 @@ function App() {
               <button onClick={() => setMenuOpen(false)} style={{ background: "none", border: "none", color: "#fff", fontSize: 20, cursor: "pointer" }}>✕</button>
             </div>
             <div style={{ flex: 1, padding: 16, overflowY: "auto" }}>
+              <button onClick={openProfileEdit} style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "12px 14px", color: "#fff", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                <span style={{ fontSize: 18 }}>✏️</span> నా ప్రొఫైల్ ఎడిట్
+              </button>
               {isMainAdmin && (
                 <button onClick={() => { setAdminPanel(true); setMenuOpen(false); }} style={{ width: "100%", background: "rgba(255,215,0,0.15)", border: "1px solid rgba(255,215,0,0.4)", borderRadius: 10, padding: "12px 14px", color: "#FFD700", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 12, marginBottom: 8, fontWeight: 700 }}>
                   <span style={{ fontSize: 18 }}>⚙️</span> అడ్మిన్ పేనెల్
@@ -946,6 +1329,36 @@ function App() {
         </div>
       )}
 
+      {/* Profile Edit Modal */}
+      {profileModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: "linear-gradient(135deg, #4a0000, #7b0000)", border: "1px solid rgba(255,215,0,0.4)", borderRadius: 20, padding: 24, width: "100%", maxWidth: 380 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#FFD700" }}>✏️ ప్రొఫైల్ ఎడిట్</div>
+              <button onClick={() => setProfileModal(false)} style={{ background: "none", border: "none", color: "#fff", fontSize: 20, cursor: "pointer" }}>✕</button>
+            </div>
+            <input ref={profilePhotoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleProfilePhotoFile(e.target.files[0])} />
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+              <div onClick={() => profilePhotoInputRef.current?.click()} style={{ width: 90, height: 90, borderRadius: 45, background: profileForm.photo ? `url(${profileForm.photo}) center/cover` : "rgba(255,255,255,0.1)", border: "2px solid rgba(232,128,10,0.5)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36, cursor: "pointer", position: "relative" }}>
+                {!profileForm.photo && "👤"}
+                <div style={{ position: "absolute", bottom: 0, right: 0, background: "#e8800a", borderRadius: "50%", width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>📷</div>
+              </div>
+            </div>
+            {profileForm.photoUploading && <div style={{ textAlign: "center", fontSize: 11, color: "#FFD700", marginBottom: 10 }}>☁️ ఫోటో అప్‌లోడ్ అవుతోంది...</div>}
+            {profileForm.photo && (
+              <div style={{ textAlign: "center", marginBottom: 12 }}>
+                <button onClick={() => setProfileForm({ ...profileForm, photo: "", photoUploading: false })} style={{ background: "none", border: "none", color: "#ff8080", fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>ఫోటో తీసివేయి</button>
+              </div>
+            )}
+            <input type="text" placeholder="మీ పేరు" value={profileForm.name} onChange={e => setProfileForm({ ...profileForm, name: e.target.value })} style={{ ...iSt, marginBottom: 0 }} />
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button onClick={() => setProfileModal(false)} style={{ flex: 1, padding: "12px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>రద్దు</button>
+              <button onClick={handleSaveProfile} disabled={profileForm.photoUploading} style={{ flex: 2, padding: "12px", background: profileForm.photoUploading ? "rgba(255,255,255,0.15)" : "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: profileForm.photoUploading ? "not-allowed" : "pointer" }}>✅ సేవ్ చేయి</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Admin Panel */}
       {adminPanel && isMainAdmin && (
         <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.85)", overflowY: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "20px 0" }}>
@@ -959,6 +1372,13 @@ function App() {
               <input type="text" placeholder="https://script.google.com/macros/s/.../exec" value={driveSettingsInput} onChange={e => setDriveSettingsInput(e.target.value)} style={{ ...iSt, marginBottom: 8, fontSize: 11 }} />
               {driveMsg && <div style={{ fontSize: 11, color: driveMsg.includes("✅") ? "#a5d6a7" : "#FFD700", marginBottom: 8 }}>{driveMsg}</div>}
               <button onClick={handleSaveDriveUrl} style={{ width: "100%", padding: "10px", background: "linear-gradient(135deg, #4285F4, #34A853)", border: "none", borderRadius: 9, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>💾 సేవ్ చేయి</button>
+            </div>
+            <div style={{ background: "rgba(15,157,88,0.08)", border: "1px solid rgba(15,157,88,0.35)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#81c995", marginBottom: 6 }}>📊 Google Sheet సింక్ (దాతలు, కార్యక్రమాలు, ఇన్ఫో, విరాళాలు, యూజర్లు)</div>
+              <input type="text" placeholder="https://script.google.com/macros/s/.../exec" value={sheetSettingsInput} onChange={e => setSheetSettingsInput(e.target.value)} style={{ ...iSt, marginBottom: 8, fontSize: 11 }} />
+              {sheetMsg && <div style={{ fontSize: 11, color: sheetMsg.includes("✅") ? "#a5d6a7" : "#FFD700", marginBottom: 8 }}>{sheetMsg}</div>}
+              <button onClick={handleSaveSheetUrl} style={{ width: "100%", padding: "10px", background: "linear-gradient(135deg, #0F9D58, #34A853)", border: "none", borderRadius: 9, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>💾 సేవ్ చేయి</button>
+              {sheetSyncMsg && <div style={{ fontSize: 10, color: "#c8e6c9", marginTop: 8 }}>{sheetSyncMsg}</div>}
             </div>
             <div style={{ background: "rgba(255,152,0,0.08)", border: "1px solid rgba(255,152,0,0.3)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#FFB74D", marginBottom: 6 }}>🔥 నిజ-సమయ సింక్ (Firebase)</div>
@@ -1005,12 +1425,17 @@ function App() {
             )}
             {itemModal.type === "gallery" && (
               <>
-                <input ref={galleryEditInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleItemImageFile(e.target.files[0])} />
+                <input ref={galleryEditInputRef} type="file" accept="image/*,video/*" style={{ display: "none" }} onChange={e => handleItemImageFile(e.target.files[0])} />
                 {(itemModal.form.base64 || itemModal.form.url) && (
-                  <img src={itemModal.form.base64 || itemModal.form.url} alt="preview" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, display: "block", marginBottom: 12 }} />
+                  (itemModal.form.mediaType || itemModal.form.type) === "video" ? (
+                    <video src={itemModal.form.base64 || itemModal.form.url} controls style={{ width: "100%", maxHeight: 200, borderRadius: 10, display: "block", marginBottom: 12 }} />
+                  ) : (
+                    <img src={itemModal.form.base64 || itemModal.form.url} alt="preview" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, display: "block", marginBottom: 12 }} />
+                  )
                 )}
-                <button onClick={() => galleryEditInputRef.current?.click()} style={{ width: "100%", padding: "11px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(232,128,10,0.35)", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 10 }}>🖼️ ఫోటో ఎంచుకోండి</button>
-                <input type="text" placeholder="లేదా ఫోటో URL నమోదు చేయండి" value={itemModal.form.url} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, url: e.target.value, base64: "" } }))} style={{ ...iSt, marginBottom: 0 }} />
+                <button onClick={() => galleryEditInputRef.current?.click()} style={{ width: "100%", padding: "11px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(232,128,10,0.35)", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 10 }}>🖼️ ఫోటో / వీడియో ఎంచుకోండి</button>
+                <input type="text" placeholder="లేదా ఫోటో URL నమోదు చేయండి" value={itemModal.form.url} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, url: e.target.value, base64: "" } }))} style={{ ...iSt, marginBottom: 10 }} />
+                <input type="text" placeholder="ఫోల్డర్ పేరు (ఉదా: నిర్మాణ ఫోటోలు)" value={itemModal.form.folder || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, folder: e.target.value } }))} style={{ ...iSt, marginBottom: 0 }} />
               </>
             )}
             {itemModal.type === "info" && (
@@ -1022,8 +1447,34 @@ function App() {
             )}
             {itemModal.type === "donor" && (
               <>
+                <input ref={donorPhotoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleDonorPhotoFile(e.target.files[0])} />
+                <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6 }}>
+                  <button type="button" onClick={() => donorPhotoInputRef.current?.click()}
+                    style={{
+                      width: 56, height: 56, borderRadius: "50%", flexShrink: 0, cursor: "pointer", position: "relative", overflow: "hidden",
+                      border: itemModal.form.photo ? "2px solid rgba(255,215,0,0.6)" : "2px dashed rgba(255,215,0,0.45)",
+                      background: itemModal.form.photo ? `url(${itemModal.form.photo}) center/cover no-repeat` : "rgba(255,255,255,0.06)",
+                      display: "flex", alignItems: "center", justifyContent: "center"
+                    }}>
+                    {!itemModal.form.photo && <span style={{ fontSize: 20 }}>📷</span>}
+                    {itemModal.form.uploadingPhoto && (
+                      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ width: 18, height: 18, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#f39c12", borderRadius: "50%", animation: "vtspin 0.8s linear infinite" }} />
+                      </div>
+                    )}
+                  </button>
+                  <div style={{ flex: 1 }}>
+                    <input type="text" placeholder="దాత పేరు" value={itemModal.form.name || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, name: e.target.value } }))} style={{ ...iSt, marginBottom: 0 }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+                  {itemModal.form.photo ? (
+                    <button onClick={() => setItemModal(m => ({ ...m, form: { ...m.form, photo: "" } }))} style={{ background: "none", border: "none", color: "#ff8080", fontSize: 10, cursor: "pointer", padding: 0 }}>🗑️ ఫోటో తీసివేయి</button>
+                  ) : "📷 దాత ఫోటో (ఐచ్ఛికం) — పైన రౌండ్ ఐకాన్ నొక్కి ఎంచుకోండి"}
+                </div>
+                <input type="text" placeholder="భార్య పేరు (ఐచ్ఛికం)" value={itemModal.form.wifeName || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, wifeName: e.target.value } }))} style={iSt} />
+                <input type="text" placeholder="పిల్లల పేర్లు (కామాతో వేరు చేయండి, ఐచ్ఛికం)" value={itemModal.form.childrenNames || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, childrenNames: e.target.value } }))} style={iSt} />
                 <input type="text" placeholder="ఐకాన్ (ఎమోజీ)" value={itemModal.form.icon || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, icon: e.target.value } }))} style={iSt} />
-                <input type="text" placeholder="పేరు" value={itemModal.form.name || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, name: e.target.value } }))} style={iSt} />
                 <input type="text" placeholder="సంబంధం" value={itemModal.form.relation || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, relation: e.target.value } }))} style={iSt} />
                 <input type="text" placeholder="గ్రామం" value={itemModal.form.village || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, village: e.target.value } }))} style={iSt} />
                 <input type="text" placeholder="స్థల వైశాల్యం" value={itemModal.form.area || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, area: e.target.value } }))} style={iSt} />
@@ -1079,12 +1530,12 @@ function App() {
   );
 }
 
-function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentInput, onEdit, onDelete }) {
+function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentInput, onEdit, onDelete, highlighted }) {
   const [showComments, setShowComments] = useState(false);
   const commentsList = Array.isArray(post.comments) ? post.comments : [];
 
   return (
-    <div style={{ background: "rgba(0,0,0,0.25)", border: "1px solid rgba(232,128,10,0.25)", borderRadius: 16, overflow: "hidden", marginBottom: 16 }}>
+    <div id={"post-" + post.id} style={{ background: "rgba(0,0,0,0.25)", border: highlighted ? "2px solid #f39c12" : "1px solid rgba(232,128,10,0.25)", boxShadow: highlighted ? "0 0 18px rgba(243,156,18,0.55)" : "none", borderRadius: 16, overflow: "hidden", marginBottom: 16, transition: "box-shadow 0.4s, border 0.4s" }}>
       <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ width: 38, height: 38, background: "rgba(232,128,10,0.3)", borderRadius: 19, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{post.avatar}</div>
         <div style={{ flex: 1 }}>
@@ -1135,7 +1586,7 @@ function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentIn
       <div style={{ padding: "8px 14px 12px", display: "flex", gap: 8, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
         <ABt icon={post.liked ? "❤️" : "🤍"} label={`${post.likes || 0}`} onClick={onLike} active={post.liked} />
         <ABt icon="💬" label={`${commentsList.length}`} onClick={() => setShowComments(!showComments)} />
-        <ABt icon="📤" label="షేర్" onClick={onShare} />
+        <ABt icon="📤" label={post.shares ? `షేర్ (${post.shares})` : "షేర్"} onClick={onShare} />
       </div>
       {showComments && (
         <div style={{ padding: "0 14px 14px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
