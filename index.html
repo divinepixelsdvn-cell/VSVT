@@ -80,6 +80,7 @@ const STORAGE_KEYS = {
   donations: "vt_public_donations",
   whatsapp: "vt_public_whatsapp",
   users: "vt_public_users",
+  posters: "vt_public_posters",
 };
 
 async function sharedGet(key) {
@@ -202,6 +203,7 @@ const PERM_CATEGORIES = [
   { key: "events", label: "కార్యక్రమాలు" },
   { key: "info", label: "గుడి ఇన్ఫో" },
   { key: "gallery", label: "మీడియా" },
+  { key: "poster", label: "ఈరోజు పోస్టర్" },
   { key: "donations", label: "విరాళాలు" },
 ];
 function emptyPerms() {
@@ -251,6 +253,14 @@ function getDayCount() {
 function formatDate(d) {
   return new Date(d).toLocaleDateString("te-IN", { day: "numeric", month: "long", year: "numeric" });
 }
+// స్థానిక (లోకల్) తేదీని YYYY-MM-DD రూపంలో ఇస్తుంది — టైమ్‌జోన్ తేడాల వల్ల తేదీ తప్పుగా లెక్కించకుండా
+function getTodayStr() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => lsGet("vt_user", null));
@@ -264,6 +274,7 @@ function App() {
   const [donors, setDonors] = useState(() => lsGet("vt_donors", LAND_DONORS));
   const [infoItems, setInfoItems] = useState(() => lsGet("vt_info", INFO_ITEMS));
   const [donationItems, setDonationItems] = useState(() => lsGet("vt_donations", DONATION_ITEMS));
+  const [posters, setPosters] = useState(() => lsGet("vt_posters", []));
   const [whatsappLink, setWhatsappLink] = useState(() => lsGet("vt_whatsapp", ""));
   const [autoShareWhatsapp, setAutoShareWhatsapp] = useState(() => lsGet("vt_auto_share_wa", true));
   const [highlightPostId, setHighlightPostId] = useState(null);
@@ -283,6 +294,7 @@ function App() {
   const [editingPostId, setEditingPostId] = useState(null);
   const galleryEditInputRef = useRef(null);
   const donorPhotoInputRef = useRef(null);
+  const posterPhotoInputRef = useRef(null);
 
   const [activeTab, setActiveTab] = useState("feed");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -335,6 +347,7 @@ function App() {
         syncCategory(STORAGE_KEYS.donors, "vt_donors", LAND_DONORS, setDonors),
         syncCategory(STORAGE_KEYS.info, "vt_info", INFO_ITEMS, setInfoItems),
         syncCategory(STORAGE_KEYS.donations, "vt_donations", DONATION_ITEMS, setDonationItems),
+        syncCategory(STORAGE_KEYS.posters, "vt_posters", [], setPosters),
         syncCategory(STORAGE_KEYS.users, "vt_users", [], setUsers),
       ]);
       const sWhatsapp = await cloudGet(STORAGE_KEYS.whatsapp);
@@ -352,6 +365,7 @@ function App() {
   useEffect(() => { lsSet("vt_donors", donors); if (storageReady) { cloudSet(STORAGE_KEYS.donors, donors); postItemsToSheet(sheetWebAppUrl, "Donors", donors); } }, [donors, storageReady]);
   useEffect(() => { lsSet("vt_info", infoItems); if (storageReady) { cloudSet(STORAGE_KEYS.info, infoItems); postItemsToSheet(sheetWebAppUrl, "Info", infoItems); } }, [infoItems, storageReady]);
   useEffect(() => { lsSet("vt_donations", donationItems); if (storageReady) { cloudSet(STORAGE_KEYS.donations, donationItems); postItemsToSheet(sheetWebAppUrl, "Donations", donationItems); } }, [donationItems, storageReady]);
+  useEffect(() => { lsSet("vt_posters", posters); if (storageReady) cloudSet(STORAGE_KEYS.posters, posters); }, [posters, storageReady]);
   useEffect(() => { lsSet("vt_whatsapp", whatsappLink); if (storageReady) cloudSet(STORAGE_KEYS.whatsapp, whatsappLink); }, [whatsappLink, storageReady]);
   useEffect(() => { lsSet("vt_auto_share_wa", autoShareWhatsapp); }, [autoShareWhatsapp]);
 
@@ -395,6 +409,7 @@ function App() {
       fbListen(STORAGE_KEYS.donors, (v) => { setDonors(Array.isArray(v) ? v : []); lsSet("vt_donors", Array.isArray(v) ? v : []); }),
       fbListen(STORAGE_KEYS.info, (v) => { setInfoItems(Array.isArray(v) ? v : []); lsSet("vt_info", Array.isArray(v) ? v : []); }),
       fbListen(STORAGE_KEYS.donations, (v) => { setDonationItems(Array.isArray(v) ? v : []); lsSet("vt_donations", Array.isArray(v) ? v : []); }),
+      fbListen(STORAGE_KEYS.posters, (v) => { setPosters(Array.isArray(v) ? v : []); lsSet("vt_posters", Array.isArray(v) ? v : []); }),
       fbListen(STORAGE_KEYS.users, (v) => { setUsers(Array.isArray(v) ? v : []); lsSet("vt_users", Array.isArray(v) ? v : []); }),
       fbListen(STORAGE_KEYS.whatsapp, (v) => { if (typeof v === "string") { setWhatsappLink(v); lsSet("vt_whatsapp", v); } }),
     ];
@@ -641,8 +656,6 @@ function App() {
         uploading: !!pendingUpload
       };
       updated = [p, ...posts];
-      // పోస్ట్ చేసిన వెంటనే (ఎడిట్ చేసినపుడు కాదు, కొత్త పోస్ట్ అయినపుడు మాత్రమే) WhatsApp గ్రూప్ కి షేర్ చేసే షీట్ ని తెరుస్తుంది
-      shareToWhatsappGroup(p);
     }
     setPosts(updated);
     setNewPost({ content: "", imageBase64: "", imagePreview: "", mediaType: "", uploading: false });
@@ -733,6 +746,27 @@ function App() {
     syncToShared(updated);
   };
 
+  // "ఈరోజు పోస్టర్" ని షేర్ చేయడానికి — ఫోటో డేటా-URL అయితే ఫైల్‌గా జతచేసి పంపే ప్రయత్నం చేస్తుంది, లేకపోతే లింక్/టెక్స్ట్ షేర్ చేస్తుంది
+  const handleSharePoster = async (poster) => {
+    const text = `🛕 ${TEMPLE_NAME_LINE1}\n📅 ఈరోజు పోస్టర్ - ${formatDate(poster.date)}`;
+    if (poster.url && poster.url.startsWith("data:") && navigator.canShare && navigator.share) {
+      try {
+        const blob = await (await fetch(poster.url)).blob();
+        const file = new File([blob], `poster-${poster.id}.jpg`, { type: blob.type || "image/jpeg" });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: TEMPLE_NAME_LINE1, text });
+          return;
+        }
+      } catch (err) { /* ఫైల్‌గా షేర్ కుదరకపోతే కింద ఫాల్‌బ్యాక్‌కి వెళ్తాం */ }
+    }
+    if (navigator.share) {
+      try { await navigator.share({ title: TEMPLE_NAME_LINE1, text, url: poster.url }); } catch (err) { /* యూజర్ రద్దు చేసుకుంటే ఇక్కడితో ఆగిపోతుంది */ }
+      return;
+    }
+    navigator.clipboard?.writeText(text);
+    alert("పోస్టర్ వివరాలు కాపీ అయ్యాయి!");
+  };
+
   const uploadToDrive = async (dataUrl, filename) => {
     if (!driveWebAppUrl) return null;
     try {
@@ -798,7 +832,7 @@ function App() {
     reader.readAsDataURL(file);
   };
 
-  const ITEM_SETTERS = { event: setEvents, gallery: setGallery, donor: setDonors, info: setInfoItems, donation: setDonationItems };
+  const ITEM_SETTERS = { event: setEvents, gallery: setGallery, donor: setDonors, info: setInfoItems, donation: setDonationItems, poster: setPosters };
   const ITEM_DEFAULTS = {
     event: { title: "", desc: "", date: new Date().toISOString().slice(0, 10), icon: "🛕" },
     gallery: { url: "", base64: "", folder: "నిర్మాణ ఫోటోలు", mediaType: "image" },
@@ -806,8 +840,9 @@ function App() {
     info: { icon: "📅", title: "", value: "" },
     donation: { icon: "📱", title: "", value: "", desc: "" },
     whatsapp: { link: "" },
+    poster: { url: "", base64: "", date: getTodayStr() },
   };
-  const TYPE_TO_CATEGORY = { event: "events", gallery: "gallery", donor: "info", info: "info", donation: "donations", whatsapp: "info" };
+  const TYPE_TO_CATEGORY = { event: "events", gallery: "gallery", donor: "info", info: "info", donation: "donations", whatsapp: "info", poster: "poster" };
 
   const openAddItem = (type) => {
     if (!hasPerm(TYPE_TO_CATEGORY[type], "add")) return;
@@ -834,18 +869,23 @@ function App() {
     if (type === "gallery" && !form.base64 && !form.url?.trim()) { alert("ఫోటో ఎంచుకోండి లేదా URL నమోదు చేయండి"); return; }
     if (type === "donor" && !form.name?.trim()) { alert("పేరు నమోదు చేయండి"); return; }
     if ((type === "info" || type === "donation") && !form.title?.trim()) { alert("శీర్షిక నమోదు చేయండి"); return; }
+    if (type === "poster" && !form.base64 && !form.url?.trim()) { alert("పోస్టర్ ఫోటో ఎంచుకోండి లేదా URL నమోదు చేయండి"); return; }
+    if (type === "poster" && !form.date) { alert("పోస్టర్ కనిపించాల్సిన తేదీ ఎంచుకోండి"); return; }
 
     const setter = ITEM_SETTERS[type];
     setter(prev => {
       if (mode === "add") {
         const newItem = type === "gallery"
           ? { id: makeId(), url: form.base64 || form.url, type: form.mediaType || "image", folder: (form.folder || "నిర్మాణ ఫోటోలు").trim() }
+          : type === "poster"
+          ? { id: makeId(), url: form.base64 || form.url, date: form.date, postedByName: currentUser?.name || (isMainAdmin ? "మెయిన్ అడ్మిన్" : "అడ్మిన్"), postedByPhoto: currentUser?.photo || "" }
           : { ...form, id: makeId() };
         return [newItem, ...prev];
       } else {
         return prev.map(it => {
           if (it.id !== id) return it;
           if (type === "gallery") return { ...it, url: form.base64 || form.url || it.url, type: form.mediaType || it.type || "image", folder: (form.folder || it.folder || "నిర్మాణ ఫోటోలు").trim() };
+          if (type === "poster") return { ...it, url: form.base64 || form.url || it.url, date: form.date || it.date };
           return { ...it, ...form };
         });
       }
@@ -958,6 +998,7 @@ function App() {
     { id: "events", label: "కార్యక్రమాలు", icon: "📅" },
     { id: "info", label: "గుడి info", icon: "ℹ️" },
     { id: "gallery", label: "మీడియా", icon: "🖼️" },
+    { id: "poster", label: "ఈరోజు పోస్టర్", icon: "🪔" },
     { id: "donations", label: "విరాళాలు", icon: "💛" },
   ];
 
@@ -1260,6 +1301,45 @@ function App() {
           </div>
         )}
 
+        {activeTab === "poster" && (
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 800, color: "#FFD700", marginBottom: 16 }}>🪔 ఈరోజు పోస్టర్</h2>
+            {hasPerm("poster", "add") && (
+              <button onClick={() => openAddItem("poster")} style={{ width: "100%", background: "rgba(255,215,0,0.12)", border: "1px solid rgba(255,215,0,0.4)", borderRadius: 12, padding: "12px", color: "#FFD700", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 14 }}>➕ కొత్త పోస్టర్ జోడించండి</button>
+            )}
+            {(() => {
+              const todayStr = getTodayStr();
+              const todaysPosters = posters.filter(p => p.date === todayStr);
+              if (todaysPosters.length === 0) {
+                return <div style={{ textAlign: "center", color: "rgba(255,255,255,0.5)", fontSize: 12, padding: 30 }}>ఈరోజుకి పోస్టర్ ఇంకా జోడించలేదు.</div>;
+              }
+              return todaysPosters.map(poster => (
+                <div key={poster.id} style={{ background: "rgba(0,0,0,0.25)", border: "1px solid rgba(232,128,10,0.3)", borderRadius: 16, overflow: "hidden", marginBottom: 16 }}>
+                  <img src={poster.url} alt="ఈరోజు పోస్టర్" style={{ width: "100%", maxHeight: 420, objectFit: "cover", display: "block", background: "#000" }} />
+                  <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <a href={poster.url} download={"today_poster_" + poster.date + ".jpg"} style={{ background: "#e8800a", color: "#fff", textDecoration: "none", padding: "8px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>⬇️ డౌన్లోడ్</a>
+                      <button onClick={() => handleSharePoster(poster)} style={{ background: "rgba(37,211,102,0.18)", border: "1px solid rgba(37,211,102,0.45)", borderRadius: 10, padding: "8px 12px", color: "#25D366", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>📤 షేర్</button>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{poster.postedByName || "అడ్మిన్"}</span>
+                      <div style={{ width: 32, height: 32, borderRadius: 16, background: poster.postedByPhoto ? `url(${poster.postedByPhoto}) center/cover` : "rgba(232,128,10,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
+                        {!poster.postedByPhoto && "👤"}
+                      </div>
+                    </div>
+                  </div>
+                  {(hasPerm("poster", "edit") || hasPerm("poster", "delete")) && (
+                    <div style={{ display: "flex", gap: 8, padding: "0 14px 12px" }}>
+                      {hasPerm("poster", "edit") && <button onClick={() => openEditItem("poster", poster)} style={{ background: "rgba(232,128,10,0.2)", border: "none", borderRadius: 8, padding: "5px 10px", color: "#f39c12", fontSize: 11, cursor: "pointer" }}>✏️ ఎడిట్</button>}
+                      {hasPerm("poster", "delete") && <button onClick={() => deleteContentItem("poster", poster.id)} style={{ background: "rgba(220,50,50,0.2)", border: "none", borderRadius: 8, padding: "5px 10px", color: "#ff8080", fontSize: 11, cursor: "pointer" }}>🗑️ తొలగించు</button>}
+                    </div>
+                  )}
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+
         {activeTab === "donations" && (
           <div>
             <div style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,215,0,0.3)", borderRadius: 16, padding: 20, marginBottom: 16, textAlign: "center" }}>
@@ -1489,6 +1569,19 @@ function App() {
                 <textarea placeholder="వివరణ" rows={2} value={itemModal.form.desc || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, desc: e.target.value } }))} style={{ ...iSt, resize: "none", marginBottom: 0 }} />
               </>
             )}
+            {itemModal.type === "poster" && (
+              <div style={{ marginBottom: 12 }}>
+                <input ref={posterPhotoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleItemImageFile(e.target.files[0])} />
+                {(itemModal.form.base64 || itemModal.form.url) && (
+                  <img src={itemModal.form.base64 || itemModal.form.url} alt="preview" style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 10, display: "block", marginBottom: 12 }} />
+                )}
+                <button onClick={() => posterPhotoInputRef.current?.click()} style={{ width: "100%", padding: "11px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(232,128,10,0.35)", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 10 }}>{itemModal.form.uploading ? "☁️ అప్‌లోడ్ అవుతోంది..." : "🖼️ పోస్టర్ ఫోటో ఎంచుకోండి"}</button>
+                <input type="text" placeholder="లేదా ఫోటో URL నమోదు చేయండి" value={itemModal.form.url || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, url: e.target.value, base64: "" } }))} style={{ ...iSt, marginBottom: 10 }} />
+                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.65)", marginBottom: 6 }}>📅 ఈ పోస్టర్ ఏ తేదీన మాత్రమే కనిపించాలో ఎంచుకోండి — తేదీ మారిన వెంటనే ఇది యాప్ నుంచి తీసివేయబడుతుంది</div>
+                <input type="date" value={itemModal.form.date || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, date: e.target.value } }))} style={{ ...iSt, marginBottom: 0 }} />
+              </div>
+            )}
+
             {itemModal.type === "whatsapp" && (
               <input type="text" placeholder="WhatsApp గ్రూప్ లింక్" value={itemModal.form.link || ""} onChange={e => setItemModal(m => ({ ...m, form: { ...m.form, link: e.target.value } }))} style={{ ...iSt, marginBottom: 0 }} />
             )}
