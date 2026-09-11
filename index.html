@@ -250,6 +250,16 @@ function getDayCount() {
   const now = new Date();
   return Math.max(0, Math.floor((now - START_DATE) / (1000 * 60 * 60 * 24)));
 }
+// ఫోటో URL/data-URL నుంచి <img> ఎలిమెంట్ ని లోడ్ చేసి Promise గా ఇస్తుంది (కాన్వాస్ మీద గీయడానికి)
+function loadImageEl(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
 function formatDate(d) {
   return new Date(d).toLocaleDateString("te-IN", { day: "numeric", month: "long", year: "numeric" });
 }
@@ -786,6 +796,89 @@ function App() {
     alert("పోస్టర్ వివరాలు కాపీ అయ్యాయి!");
   };
 
+  // "ఈరోజు పోస్టర్" ని లాగిన్ అయిన యూజర్ పేరు + ఫోటోతో కలిపి ఒకే ఫోటోగా (కాన్వాస్ ద్వారా) డౌన్లోడ్ చేస్తుంది.
+  // ఫోటో వేరే డొమైన్ నుంచి (ఉదా: Google Drive) వచ్చి, CORS అనుమతి లేకపోతే, సాదా పోస్టర్ ఫోటోనే డౌన్లోడ్ చేస్తుంది.
+  const handleDownloadPoster = async (poster) => {
+    const fallbackDownload = () => {
+      const a = document.createElement("a");
+      a.href = poster.url;
+      a.download = "today_poster_" + poster.date + ".jpg";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    };
+    try {
+      const posterImg = await loadImageEl(poster.url);
+      const W = posterImg.naturalWidth || posterImg.width;
+      const H = posterImg.naturalHeight || posterImg.height;
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(posterImg, 0, 0, W, H);
+
+      // కింద పేరు/ఫోటో కోసం ఒక సెమీ-ట్రాన్స్‌పరెంట్ బార్
+      const barHeight = Math.max(56, Math.round(H * 0.09));
+      const barY = H - barHeight;
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, barY, W, barHeight);
+
+      const avatarSize = Math.round(barHeight * 0.72);
+      const pad = Math.round(W * 0.03);
+      const avatarX = W - avatarSize - pad;
+      const avatarY = barY + (barHeight - avatarSize) / 2;
+
+      if (currentUser?.photo) {
+        try {
+          const avatarImg = await loadImageEl(currentUser.photo);
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+          ctx.closePath();
+          ctx.clip();
+          ctx.drawImage(avatarImg, avatarX, avatarY, avatarSize, avatarSize);
+          ctx.restore();
+        } catch { /* యూజర్ ఫోటో లోడ్ కాకపోతే ఖాళీ వృత్తం చూపిస్తాం */
+          ctx.fillStyle = "rgba(255,255,255,0.3)";
+          ctx.beginPath();
+          ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,0.3)";
+        ctx.beginPath();
+        ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.lineWidth = Math.max(1, Math.round(avatarSize * 0.04));
+      ctx.beginPath();
+      ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+      ctx.stroke();
+
+      const fontSize = Math.max(16, Math.round(barHeight * 0.36));
+      ctx.font = `bold ${fontSize}px 'Noto Sans Telugu', 'Segoe UI', sans-serif`;
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText(currentUser?.name || "అతిథి", avatarX - Math.round(W * 0.02), barY + barHeight / 2);
+
+      canvas.toBlob((blob) => {
+        if (!blob) { fallbackDownload(); return; }
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = "today_poster_" + poster.date + ".jpg";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+      }, "image/jpeg", 0.92);
+    } catch (err) {
+      fallbackDownload();
+    }
+  };
+
   const uploadToDrive = async (dataUrl, filename) => {
     if (!driveWebAppUrl) return null;
     try {
@@ -1148,6 +1241,7 @@ function App() {
                 setCommentInput={(v) => setCommentInputs({ ...commentInputs, [post.id]: v })}
                 onEdit={hasPerm("feed", "edit") ? () => handleEditPost(post) : null}
                 onDelete={hasPerm("feed", "delete") ? () => handleDeletePost(post.id) : null}
+                onMediaClick={(url) => setSelectedMedia({ url: url || post.image, type: post.type === "video" ? "video" : "image" })}
               />
             ))}
           </div>
@@ -1321,21 +1415,6 @@ function App() {
                 </div>
               ));
             })()}
-            {selectedMedia && (
-              <div onClick={() => setSelectedMedia(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999, padding: 20 }}>
-                <div onClick={e => e.stopPropagation()} style={{ maxWidth: 440, width: "100%" }}>
-                  {selectedMedia.type === "video" ? (
-                    <video src={selectedMedia.url} controls autoPlay style={{ width: "100%", borderRadius: 14, display: "block" }} />
-                  ) : (
-                    <img src={selectedMedia.url} alt="" style={{ width: "100%", borderRadius: 14, display: "block" }} />
-                  )}
-                  <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-                    <a href={selectedMedia.url} download={selectedMedia.type === "video" ? "temple_video.mp4" : "temple_photo.jpg"} style={{ flex: 1, background: "#e8800a", color: "#fff", textDecoration: "none", padding: "12px", borderRadius: 10, textAlign: "center", fontSize: 13, fontWeight: 700 }}>⬇️ డౌన్లోడ్</a>
-                    <button onClick={() => setSelectedMedia(null)} style={{ flex: 1, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", padding: "12px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✕ మూసివేయి</button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -1356,7 +1435,7 @@ function App() {
                   <img src={poster.url} alt="ఈరోజు పోస్టర్" style={{ width: "100%", maxHeight: 420, objectFit: "cover", display: "block", background: "#000" }} />
                   <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                     <div style={{ display: "flex", gap: 8 }}>
-                      <a href={poster.url} download={"today_poster_" + poster.date + ".jpg"} style={{ background: "#e8800a", color: "#fff", textDecoration: "none", padding: "8px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>⬇️ డౌన్లోడ్</a>
+                      <button onClick={() => handleDownloadPoster(poster)} style={{ background: "#e8800a", border: "none", color: "#fff", padding: "8px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>⬇️ డౌన్లోడ్</button>
                       <button onClick={() => handleSharePoster(poster)} style={{ background: "rgba(37,211,102,0.18)", border: "1px solid rgba(37,211,102,0.45)", borderRadius: 10, padding: "8px 12px", color: "#25D366", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>📤 షేర్</button>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1525,6 +1604,23 @@ function App() {
         </div>
       )}
 
+      {/* Media Viewer (ఫీడ్/గ్యాలరీ/పోస్టర్ - ఎక్కడి నుంచైనా ఫోటో/వీడియో పూర్తి సైజ్‌లో చూడటానికి) */}
+      {selectedMedia && (
+        <div onClick={() => setSelectedMedia(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ maxWidth: 440, width: "100%" }}>
+            {selectedMedia.type === "video" ? (
+              <video src={selectedMedia.url} controls autoPlay style={{ width: "100%", borderRadius: 14, display: "block" }} />
+            ) : (
+              <img src={selectedMedia.url} alt="" style={{ width: "100%", borderRadius: 14, display: "block" }} />
+            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+              <a href={selectedMedia.url} download={selectedMedia.type === "video" ? "temple_video.mp4" : "temple_photo.jpg"} style={{ flex: 1, background: "#e8800a", color: "#fff", textDecoration: "none", padding: "12px", borderRadius: 10, textAlign: "center", fontSize: 13, fontWeight: 700 }}>⬇️ డౌన్లోడ్</a>
+              <button onClick={() => setSelectedMedia(null)} style={{ flex: 1, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", padding: "12px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✕ మూసివేయి</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Item Modal */}
       {itemModal && (isMainAdmin || isSubAdmin) && (
         <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.85)", overflowY: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "20px 0" }}>
@@ -1661,7 +1757,7 @@ function App() {
   );
 }
 
-function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentInput, onEdit, onDelete, highlighted }) {
+function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentInput, onEdit, onDelete, highlighted, onMediaClick }) {
   const [showComments, setShowComments] = useState(false);
   const commentsList = Array.isArray(post.comments) ? post.comments : [];
 
@@ -1676,7 +1772,11 @@ function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentIn
         {onEdit && <button onClick={onEdit} style={{ background: "rgba(232,128,10,0.2)", border: "none", borderRadius: 8, padding: "5px 10px", color: "#f39c12", fontSize: 12, cursor: "pointer", marginRight: 6 }}>✏️</button>}
         {onDelete && <button onClick={onDelete} style={{ background: "rgba(220,50,50,0.2)", border: "none", borderRadius: 8, padding: "5px 10px", color: "#ff8080", fontSize: 12, cursor: "pointer" }}>🗑️</button>}
       </div>
-      {post.image && (
+      {post.image && (() => {
+        const displaySrc = post.image.includes("drive.google.com") && post.image.includes("/view")
+          ? post.image.replace("/view?usp=drivesdk", "/preview").replace("/view", "/preview")
+          : post.image;
+        return (
   <div style={{ width: "100%", height: 300, overflow: "hidden", borderRadius: 8, marginTop: 8, background: "#000", position: "relative" }}>
     {post.uploading && (
       <div style={{ position: "absolute", inset: 0, zIndex: 2, background: "rgba(0,0,0,0.45)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -1685,16 +1785,13 @@ function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentIn
       </div>
     )}
     {post.type === "video" ? (
-      <video src={post.image} controls style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      <video src={displaySrc} controls style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
     ) : (
       <img 
-        src={
-          post.image.includes("drive.google.com") && post.image.includes("/view")
-            ? post.image.replace("/view?usp=drivesdk", "/preview").replace("/view", "/preview")
-            : post.image
-        } 
+        src={displaySrc} 
         alt="Post media" 
-        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} 
+        onClick={() => onMediaClick && onMediaClick(displaySrc)}
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", cursor: "pointer" }} 
         onError={(e) => {
           const img = e.target;
           const isDataUrl = (post.image || "").startsWith("data:");
@@ -1711,7 +1808,8 @@ function PostCard({ post, onLike, onShare, onComment, commentInput, setCommentIn
       />
     )}
   </div>
-)}
+        );
+      })()}
       <div style={{ padding: "12px 14px 8px", fontSize: 13, color: "rgba(255,255,255,0.85)", lineHeight: 1.7 }}>{post.content}</div>
       {post.blogLink && <div style={{ padding: "4px 14px 10px" }}><a href={post.blogLink} target="_blank" rel="noreferrer" style={{ color: "#f39c12", fontSize: 12, fontWeight: 600, textDecoration: "underline" }}>📖 బ్లాగ్ చదవండి →</a></div>}
       <div style={{ padding: "8px 14px 12px", display: "flex", gap: 8, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
