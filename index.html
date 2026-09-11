@@ -1322,9 +1322,9 @@ function App() {
                       <button onClick={() => handleSharePoster(poster)} style={{ background: "rgba(37,211,102,0.18)", border: "1px solid rgba(37,211,102,0.45)", borderRadius: 10, padding: "8px 12px", color: "#25D366", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>📤 షేర్</button>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{poster.postedByName || "అడ్మిన్"}</span>
-                      <div style={{ width: 32, height: 32, borderRadius: 16, background: poster.postedByPhoto ? `url(${poster.postedByPhoto}) center/cover` : "rgba(232,128,10,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
-                        {!poster.postedByPhoto && "👤"}
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{currentUser?.name || "అతిథి"}</span>
+                      <div style={{ width: 32, height: 32, borderRadius: 16, background: currentUser?.photo ? `url(${currentUser.photo}) center/cover` : "rgba(232,128,10,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
+                        {!currentUser?.photo && "👤"}
                       </div>
                     </div>
                   </div>
