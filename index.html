@@ -775,18 +775,99 @@ function App() {
     syncToShared(updated);
   };
 
-  // "ఈరోజు పోస్టర్" ని షేర్ చేయడానికి — ఫోటో డేటా-URL అయితే ఫైల్‌గా జతచేసి పంపే ప్రయత్నం చేస్తుంది, లేకపోతే లింక్/టెక్స్ట్ షేర్ చేస్తుంది
+  // ============ "ఈరోజు పోస్టర్" కంపోజిట్ చేసే హెల్పర్ ============
+  // అప్‌లోడ్ చేసిన పోస్టర్ ఫోటో (1080x1920) మీద: కింద మెరూన్ బార్ (ఎత్తు 1cm), యూజర్ పేరు (పెద్ద ఫాంట్),
+  // మరియు యూజర్ ఫోటో పెద్ద రౌండ్ షేప్‌లో బార్ పైకి పొడుచుకువచ్చేలా — రిఫరెన్స్ డిజైన్ ప్రకారం — గీస్తుంది.
+  const composePosterCanvas = async (poster) => {
+    const posterImg = await loadImageEl(poster.url);
+    const W = posterImg.naturalWidth || posterImg.width;
+    const H = posterImg.naturalHeight || posterImg.height;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(posterImg, 0, 0, W, H);
+
+    // ------ కింద మెరూన్ బార్ — ఎత్తు 1cm (300dpi ప్రామాణికం: 1cm ≈ 118px, పోస్టర్ ఎత్తుకు అనుగుణంగా స్కేల్) ------
+    const PX_PER_CM_300DPI = 118;
+    const barHeight = Math.max(1, Math.round(PX_PER_CM_300DPI * (H / 1920)));
+    const barY = H - barHeight;
+    ctx.fillStyle = "#940010"; // దేవాలయం మెరూన్ రంగు (రిఫరెన్స్ ఫోటో ప్రకారం)
+    ctx.fillRect(0, barY, W, barHeight);
+
+    // ------ యూజర్ ఫోటో — పెద్ద సైజులో రౌండ్‌గా, కుడి దిగువన బార్ పైకి పొడుచుకువచ్చేలా ------
+    const avatarSize = Math.round(W * 0.304);
+    const avatarCenterX = Math.round(W * 0.837);
+    const avatarCenterY = Math.round(H * 0.908);
+    const avatarX = avatarCenterX - avatarSize / 2;
+    const avatarY = avatarCenterY - avatarSize / 2;
+    const borderWidth = Math.max(4, Math.round(avatarSize * 0.032));
+
+    // మెత్తటి నీడ + తెల్ల అంచు
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = Math.round(avatarSize * 0.06);
+    ctx.shadowOffsetY = Math.round(avatarSize * 0.02);
+    ctx.beginPath();
+    ctx.arc(avatarCenterX, avatarCenterY, avatarSize / 2 + borderWidth / 2, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff";
+    ctx.fill();
+    ctx.restore();
+
+    // ఫోటోను వృత్తాకారంలో క్లిప్ చేసి గీయడం
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(avatarCenterX, avatarCenterY, avatarSize / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    if (currentUser?.photo) {
+      try {
+        const avatarImg = await loadImageEl(currentUser.photo);
+        ctx.drawImage(avatarImg, avatarX, avatarY, avatarSize, avatarSize);
+      } catch { /* యూజర్ ఫోటో లోడ్ కాకపోతే ఖాళీ రంగు వృత్తం చూపిస్తాం */
+        ctx.fillStyle = "#6b8bfd";
+        ctx.fillRect(avatarX, avatarY, avatarSize, avatarSize);
+      }
+    } else {
+      ctx.fillStyle = "#6b8bfd";
+      ctx.fillRect(avatarX, avatarY, avatarSize, avatarSize);
+    }
+    ctx.restore();
+
+    // ------ పేరు — పెద్ద ఫాంట్‌లో, బార్ లో ఎడమవైపు, తెల్ల రంగులో ------
+    const fontSize = Math.max(20, Math.round(barHeight * 0.42));
+    ctx.font = `bold ${fontSize}px 'Noto Sans Telugu', 'Segoe UI', sans-serif`;
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    const textLeftPad = Math.round(W * 0.035);
+    const textMaxWidth = Math.max(20, avatarX - textLeftPad - Math.round(W * 0.02));
+    const fullName = currentUser?.name || "అతిథి";
+    let displayName = fullName;
+    while (ctx.measureText(displayName).width > textMaxWidth && displayName.length > 3) {
+      displayName = displayName.slice(0, -1);
+    }
+    if (displayName !== fullName) displayName = displayName.slice(0, -1) + "…";
+    ctx.fillText(displayName, textLeftPad, barY + barHeight / 2);
+
+    return canvas;
+  };
+
+  // "ఈరోజు పోస్టర్" ని షేర్ చేయడానికి — ముందుగా పేరు+ఫోటో కలిపిన కంపోజిట్ చేసి ఫైల్‌గా పంపే ప్రయత్నం చేస్తుంది, కుదరకపోతే లింక్/టెక్స్ట్ షేర్ చేస్తుంది
   const handleSharePoster = async (poster) => {
     const text = `🛕 ${TEMPLE_NAME_LINE1}\n📅 ఈరోజు పోస్టర్ - ${formatDate(poster.date)}`;
-    if (poster.url && poster.url.startsWith("data:") && navigator.canShare && navigator.share) {
+    if (navigator.canShare && navigator.share) {
       try {
-        const blob = await (await fetch(poster.url)).blob();
-        const file = new File([blob], `poster-${poster.id}.jpg`, { type: blob.type || "image/jpeg" });
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: TEMPLE_NAME_LINE1, text });
-          return;
+        const canvas = await composePosterCanvas(poster);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.95));
+        if (blob) {
+          const file = new File([blob], `poster-${poster.id}.jpg`, { type: "image/jpeg" });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: TEMPLE_NAME_LINE1, text });
+            return;
+          }
         }
-      } catch (err) { /* ఫైల్‌గా షేర్ కుదరకపోతే కింద ఫాల్‌బ్యాక్‌కి వెళ్తాం */ }
+      } catch (err) { /* కంపోజిట్/ఫైల్‌గా షేర్ కుదరకపోతే కింద ఫాల్‌బ్యాక్‌కి వెళ్తాం */ }
     }
     if (navigator.share) {
       try { await navigator.share({ title: TEMPLE_NAME_LINE1, text, url: poster.url }); } catch (err) { /* యూజర్ రద్దు చేసుకుంటే ఇక్కడితో ఆగిపోతుంది */ }
@@ -808,61 +889,7 @@ function App() {
       a.remove();
     };
     try {
-      const posterImg = await loadImageEl(poster.url);
-      const W = posterImg.naturalWidth || posterImg.width;
-      const H = posterImg.naturalHeight || posterImg.height;
-      const canvas = document.createElement("canvas");
-      canvas.width = W;
-      canvas.height = H;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(posterImg, 0, 0, W, H);
-
-      // కింద పేరు/ఫోటో కోసం ఒక సెమీ-ట్రాన్స్‌పరెంట్ బార్
-      const barHeight = Math.max(56, Math.round(H * 0.09));
-      const barY = H - barHeight;
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.fillRect(0, barY, W, barHeight);
-
-      const avatarSize = Math.round(barHeight * 0.72);
-      const pad = Math.round(W * 0.03);
-      const avatarX = W - avatarSize - pad;
-      const avatarY = barY + (barHeight - avatarSize) / 2;
-
-      if (currentUser?.photo) {
-        try {
-          const avatarImg = await loadImageEl(currentUser.photo);
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
-          ctx.closePath();
-          ctx.clip();
-          ctx.drawImage(avatarImg, avatarX, avatarY, avatarSize, avatarSize);
-          ctx.restore();
-        } catch { /* యూజర్ ఫోటో లోడ్ కాకపోతే ఖాళీ వృత్తం చూపిస్తాం */
-          ctx.fillStyle = "rgba(255,255,255,0.3)";
-          ctx.beginPath();
-          ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      } else {
-        ctx.fillStyle = "rgba(255,255,255,0.3)";
-        ctx.beginPath();
-        ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.strokeStyle = "rgba(255,255,255,0.8)";
-      ctx.lineWidth = Math.max(1, Math.round(avatarSize * 0.04));
-      ctx.beginPath();
-      ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
-      ctx.stroke();
-
-      const fontSize = Math.max(16, Math.round(barHeight * 0.36));
-      ctx.font = `bold ${fontSize}px 'Noto Sans Telugu', 'Segoe UI', sans-serif`;
-      ctx.fillStyle = "#fff";
-      ctx.textAlign = "right";
-      ctx.textBaseline = "middle";
-      ctx.fillText(currentUser?.name || "అతిథి", avatarX - Math.round(W * 0.02), barY + barHeight / 2);
-
+      const canvas = await composePosterCanvas(poster);
       canvas.toBlob((blob) => {
         if (!blob) { fallbackDownload(); return; }
         const blobUrl = URL.createObjectURL(blob);
@@ -873,7 +900,7 @@ function App() {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
-      }, "image/jpeg", 0.92);
+      }, "image/jpeg", 0.95);
     } catch (err) {
       fallbackDownload();
     }
