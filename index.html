@@ -314,6 +314,9 @@ function App() {
   const menuRef = useRef(null);
   const [authForm, setAuthForm] = useState({ name: "", phone: "", password: "", photo: "", photoUploading: false });
   const [authError, setAuthError] = useState("");
+  const [forgotMode, setForgotMode] = useState(false);
+  const [resetForm, setResetForm] = useState({ name: "", phone: "", newPassword: "" });
+  const [resetMsg, setResetMsg] = useState("");
   const [syncStatus, setSyncStatus] = useState("");
 
   useEffect(() => {
@@ -579,6 +582,23 @@ function App() {
     } else {
       setAuthError("ఫోన్ నెంబర్ లేదా పాస్వర్డ్ సరికాదు");
     }
+  };
+
+  // పాస్వర్డ్ మర్చిపోయిన యూజర్లు, వారి పేరు + ఫోన్ నెంబర్ సరిపోతేనే కొత్త పాస్వర్డ్ పెట్టుకోగలరు (మెయిన్ అడ్మిన్ పాస్వర్డ్ ఇక్కడ మారదు)
+  const handleResetPassword = () => {
+    setResetMsg("");
+    const phone = resetForm.phone.trim();
+    const name = resetForm.name.trim();
+    if (!name) { setResetMsg("నమోదు చేసిన పూర్తి పేరు రాయండి"); return; }
+    if (!/^\d{10}$/.test(phone)) { setResetMsg("10 అంకెల ఫోన్ నెంబర్ నమోదు చేయండి"); return; }
+    if (!resetForm.newPassword || resetForm.newPassword.length < 4 || resetForm.newPassword.length > 8) { setResetMsg("కొత్త పాస్వర్డ్ 4-8 అక్షరాలు ఉండాలి"); return; }
+    if (MAIN_ADMINS.find(a => a.id === phone)) { setResetMsg("మెయిన్ అడ్మిన్ పాస్వర్డ్ ఇక్కడ మార్చలేరు — దయచేసి డెవలపర్‌ని సంప్రదించండి"); return; }
+    const existing = users.find(u => u.phone === phone);
+    if (!existing || existing.name.trim().toLowerCase() !== name.toLowerCase()) { setResetMsg("ఈ పేరు మరియు ఫోన్ నెంబర్‌తో ఖాతా కనబడలేదు"); return; }
+    setUsers(users.map(u => u.phone === phone ? { ...u, password: resetForm.newPassword } : u));
+    setSubAdmins(subAdmins.map(a => a.phone === phone ? { ...a, password: resetForm.newPassword } : a));
+    setResetMsg("✅ పాస్వర్డ్ మార్చబడింది! ఇప్పుడు కొత్త పాస్వర్డ్‌తో లాగిన్ అవ్వండి.");
+    setResetForm({ name: "", phone: "", newPassword: "" });
   };
 
   const handleLogout = () => {
@@ -1009,6 +1029,18 @@ function App() {
         <div style={{ fontSize: 18, fontWeight: 900, color: "#fff", textAlign: "center", lineHeight: 1.4, marginBottom: 4 }}>{TEMPLE_NAME_LINE1}</div>
         <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.85)", textAlign: "center", marginBottom: 24 }}>{TEMPLE_NAME_LINE2}</div>
         <div style={{ background: "rgba(0,0,0,0.35)", borderRadius: 20, padding: 24, width: "100%", maxWidth: 360, border: "1px solid rgba(255,255,255,0.2)" }}>
+          {forgotMode ? (
+            <>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "#FFD700", marginBottom: 16, textAlign: "center" }}>🔑 పాస్వర్డ్ రీసెట్</div>
+              <input type="text" placeholder="నమోదు చేసిన పూర్తి పేరు" value={resetForm.name} onChange={e => setResetForm({ ...resetForm, name: e.target.value })} style={iSt} />
+              <input type="tel" placeholder="ఫోన్ నెంబర్ (10 అంకెలు)" value={resetForm.phone} onChange={e => setResetForm({ ...resetForm, phone: e.target.value })} style={iSt} />
+              <input type="password" placeholder="కొత్త పాస్వర్డ్ (4-8 అక్షరాలు)" value={resetForm.newPassword} onChange={e => setResetForm({ ...resetForm, newPassword: e.target.value })} style={{ ...iSt, marginBottom: 0 }} />
+              {resetMsg && <div style={{ color: resetMsg.includes("✅") ? "#a5d6a7" : "#ffcdd2", fontSize: 12, marginTop: 10, textAlign: "center" }}>{resetMsg}</div>}
+              <button onClick={handleResetPassword} style={{ width: "100%", marginTop: 16, padding: "14px", background: "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 12, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>✅ పాస్వర్డ్ మార్చండి</button>
+              <button onClick={() => { setForgotMode(false); setResetMsg(""); setResetForm({ name: "", phone: "", newPassword: "" }); }} style={{ width: "100%", marginTop: 10, padding: "12px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>⬅ లాగిన్‌కి వెళ్ళండి</button>
+            </>
+          ) : (
+            <>
           <div style={{ display: "flex", marginBottom: 20, background: "rgba(0,0,0,0.3)", borderRadius: 12, padding: 4 }}>
             {["register", "login"].map(m => (
               <button key={m} onClick={() => { setAuthMode(m); setAuthError(""); }}
@@ -1039,6 +1071,13 @@ function App() {
             style={{ width: "100%", marginTop: 16, padding: "14px", background: "linear-gradient(135deg, #c0392b, #e67e22)", border: "none", borderRadius: 12, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>
             {authMode === "register" ? "🙏 నమోదు చేయండి" : "🔐 లాగిన్ అవ్వండి"}
           </button>
+          {authMode === "login" && (
+            <div style={{ textAlign: "center", marginTop: 14 }}>
+              <button onClick={() => { setForgotMode(true); setAuthError(""); setResetMsg(""); }} style={{ background: "none", border: "none", color: "#FFD700", fontSize: 12, textDecoration: "underline", cursor: "pointer" }}>పాస్వర్డ్ మర్చిపోయారా?</button>
+            </div>
+          )}
+            </>
+          )}
         </div>
       </div>
     );
