@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "io.github.divinepixelsdvn_cell.twa",
+        "sha256_cert_fingerprints": ["A1:5E:98:01:49:69:F1:6C:46:52:F5:AD:4B:31:C7:EF:FC:FE:2E:A0:FC:DA:CA:66:A8:6E:E6:E6:18:82:8E:AD"]
+      }
+    }]
