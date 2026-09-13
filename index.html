@@ -1459,18 +1459,18 @@ function App() {
               }
               return todaysPosters.map(poster => (
                 <div key={poster.id} style={{ background: "rgba(0,0,0,0.25)", border: "1px solid rgba(232,128,10,0.3)", borderRadius: 16, overflow: "hidden", marginBottom: 16 }}>
-                  <img src={poster.url} alt="ఈరోజు పోస్టర్" style={{ width: "100%", maxHeight: 420, objectFit: "cover", display: "block", background: "#000" }} />
-                  <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => handleDownloadPoster(poster)} style={{ background: "#e8800a", border: "none", color: "#fff", padding: "8px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>⬇️ డౌన్లోడ్</button>
-                      <button onClick={() => handleSharePoster(poster)} style={{ background: "rgba(37,211,102,0.18)", border: "1px solid rgba(37,211,102,0.45)", borderRadius: 10, padding: "8px 12px", color: "#25D366", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>📤 షేర్</button>
+                  {/* కింద మెరూన్ బార్ (1cm) + పెద్ద రౌండ్ ఫోటో + పెద్ద పేరు — డౌన్‌లోడ్/షేర్ లో వచ్చే పోస్టర్ లాగే యాప్‌లో కూడా కనిపించేలా */}
+                  <div style={{ position: "relative", width: "100%", aspectRatio: "1080 / 1920", overflow: "hidden", background: "#000", containerType: "inline-size" }}>
+                    <img src={poster.url} alt="ఈరోజు పోస్టర్" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: "10.93cqw", background: "#940010" }} />
+                    <div style={{ position: "absolute", left: "3.5%", bottom: 0, height: "10.93cqw", width: "62%", display: "flex", alignItems: "center", color: "#fff", fontWeight: 800, fontSize: "4.6cqw", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {currentUser?.name || "అతిథి"}
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{currentUser?.name || "అతిథి"}</span>
-                      <div style={{ width: 32, height: 32, borderRadius: 16, background: currentUser?.photo ? `url(${currentUser.photo}) center/cover` : "rgba(232,128,10,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
-                        {!currentUser?.photo && "👤"}
-                      </div>
-                    </div>
+                    <div style={{ position: "absolute", left: "68.5%", top: "82.25%", width: "30.4cqw", aspectRatio: "1 / 1", borderRadius: "50%", border: "0.97cqw solid #fff", boxShadow: "0 2px 10px rgba(0,0,0,0.35)", background: currentUser?.photo ? `url(${currentUser.photo}) center/cover` : "#6b8bfd" }} />
+                  </div>
+                  <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+                    <button onClick={() => handleDownloadPoster(poster)} style={{ background: "#e8800a", border: "none", color: "#fff", padding: "8px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>⬇️ డౌన్లోడ్</button>
+                    <button onClick={() => handleSharePoster(poster)} style={{ background: "rgba(37,211,102,0.18)", border: "1px solid rgba(37,211,102,0.45)", borderRadius: 10, padding: "8px 12px", color: "#25D366", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>📤 షేర్</button>
                   </div>
                   {(hasPerm("poster", "edit") || hasPerm("poster", "delete")) && (
                     <div style={{ display: "flex", gap: 8, padding: "0 14px 12px" }}>
