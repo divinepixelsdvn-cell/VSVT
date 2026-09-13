@@ -834,21 +834,22 @@ function App() {
     }
     ctx.restore();
 
-    // ------ పేరు — పెద్ద ఫాంట్‌లో, బార్ లో ఎడమవైపు, తెల్ల రంగులో ------
+    // ------ పేరు — పెద్ద ఫాంట్‌లో, ఫోటో మీదకు రాకుండా మిగిలిన స్థలంలో సెంటర్‌గా, తెల్ల రంగులో ------
     const fontSize = Math.max(20, Math.round(barHeight * 0.42));
     ctx.font = `bold ${fontSize}px 'Noto Sans Telugu', 'Segoe UI', sans-serif`;
     ctx.fillStyle = "#fff";
-    ctx.textAlign = "left";
+    ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const textLeftPad = Math.round(W * 0.035);
-    const textMaxWidth = Math.max(20, avatarX - textLeftPad - Math.round(W * 0.02));
+    const textAreaPad = Math.round(W * 0.03);
+    const textAreaWidth = Math.max(20, avatarX - textAreaPad); // ఎడమ అంచు నుండి ఫోటో మొదలయ్యే చోటు వరకు అందుబాటులో ఉన్న స్థలం
+    const textMaxWidth = Math.max(20, textAreaWidth - textAreaPad);
     const fullName = currentUser?.name || "అతిథి";
     let displayName = fullName;
     while (ctx.measureText(displayName).width > textMaxWidth && displayName.length > 3) {
       displayName = displayName.slice(0, -1);
     }
     if (displayName !== fullName) displayName = displayName.slice(0, -1) + "…";
-    ctx.fillText(displayName, textLeftPad, barY + barHeight / 2);
+    ctx.fillText(displayName, textAreaWidth / 2, barY + barHeight / 2);
 
     return canvas;
   };
@@ -1463,7 +1464,7 @@ function App() {
                   <div style={{ position: "relative", width: "100%", aspectRatio: "1080 / 1920", overflow: "hidden", background: "#000", containerType: "inline-size" }}>
                     <img src={poster.url} alt="ఈరోజు పోస్టర్" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                     <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: "10.93cqw", background: "#940010" }} />
-                    <div style={{ position: "absolute", left: "3.5%", bottom: 0, height: "10.93cqw", width: "62%", display: "flex", alignItems: "center", color: "#fff", fontWeight: 800, fontSize: "4.6cqw", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <div style={{ position: "absolute", left: 0, bottom: 0, height: "10.93cqw", width: "66%", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#fff", fontWeight: 800, fontSize: "4.6cqw", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", padding: "0 3%" }}>
                       {currentUser?.name || "అతిథి"}
                     </div>
                     <div style={{ position: "absolute", left: "68.5%", top: "82.25%", width: "30.4cqw", aspectRatio: "1 / 1", borderRadius: "50%", border: "0.97cqw solid #fff", boxShadow: "0 2px 10px rgba(0,0,0,0.35)", background: currentUser?.photo ? `url(${currentUser.photo}) center/cover` : "#6b8bfd" }} />
